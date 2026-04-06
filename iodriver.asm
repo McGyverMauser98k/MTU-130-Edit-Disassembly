@@ -1,0 +1,2893 @@
+
+
+            .include "monomeg.inc"
+
+            .importzp DESTBUFF, MEMBUFF, MEMCOUNT, P0SCRATCH, PCSAVE
+            .importzp TMPBUFP, TMPPTR, BYTRES
+
+
+            .segment "ioscratch0" : zeropage
+
+; $F0 - $FF : Zero-page Scratch RAM for console I-0
+;
+            .exportzp QLN, VRAMDST, VRAMORG, CHARFNTP, VRAMCNT, IOTEMP1, IOTEMP2, BITDISPL
+
+QLN:        .res    2              ; $F0 Ptr to line-buffer used for INLINE AND EDLINE
+VRAMDST:    .res    2              ; $F2 - $F3 Video ram dest for graphic funcs
+VRAMORG:    .res    2              ; $F4 - $F5 Video ram origin for graphic funcs
+CHARFNTP:   .res    2              ; $F6 - $F7 Pointer to character font
+VRAMCNT:    .res    2              ; $F8 - $F9 Video ram count for graphic funcs
+IOTEMP1:    .res    1              ; $FA Temporary storage for keyboard routine
+IOTEMP2:    .res    1              ; $FB Temporary storage for screen routines
+BITDISPL:   .res    1              ; $FC Horizontal displacement of pixel
+NUMCHRS:    .res    1              ; $FD Number of chars in input buffer
+UNKNWN16:   .res    1              ; $FE
+UNKNWN17:   .res    1              ; $FF
+
+            .segment "ioscratch"
+
+            .export ASVGR, XSVGR, YSVGR, ASVGR2, XSVGR2, XHNGED, DASHED
+
+; Scratch ram used by Console I-O and graphics drivers
+;
+ASVBP:      .res    1               ; $02B0 - Temporary storage for A in BEEP proc.
+TMPMASK:    .res    2               ; $02B1-$02B2 - Temporary storage for video masks
+L02B3:      .res    1               ; $02B3
+L02B4:      .res    2               ; $02B4
+L02B6:      .res    7               ; $02B6
+L02BD:      .res    1               ; $02BD
+L02BE:      .res    2               ; $02BE
+L02C0:      .res    7               ; $02C0
+ASVGR:      .res    1               ; $02C7
+XSVGR:      .res    1               ; $02C8
+YSVGR:      .res    1               ; $02C9
+TCURS:      .res    2               ; $02CA
+ASVGR2:     .res    1               ; $02CC
+XSVKB:      .res    1               ; $02CD
+YSVKB:      .res    1               ; $02CE
+XSVGR2:     .res    1               ; $02CF
+FNBNK:      .res    1               ; $02D0 Bank of current character table
+XHNGED:     .res    1               ; $02D1 Flag. If bit 7 = 1, orig and dest are exchanged
+DASHED:     .res    1               ; $02D2 Flag. If bit 7 = 1, dashed graphic mode
+L02D3:      .res    1               ; $02D3
+SAVIDX:     .res    1               ; $02D4 Temporary storage for index caalculations
+CURPOS:     .res    1               ; $02D5 Cursor position in line buffer
+XSAVLI:     .res    1               ; $02D6 Save X in line editing functions
+INSFLAG:    .res    1               ; $02D7 Flag. It bit 7 = 1, insert enabled
+FSTCHAR:    .res    1               ; $02D8 Index of first char in current KEYSTR entry
+LSTCHAR:    .res    1               ; $02D9 Index of last char in current KEYSTR entry
+LSTBKTB:    .res    1               ; $02DA Pos of beginning last line in bcktrck buffer
+L02DB:      .res    1               ; $02DB
+FNJUMP:     .res    2               ; $02DC Jump to special key function
+L02DE:      .res    1               ; $02DE
+L02DF:      .res    1               ; $02DF
+
+            .segment "iodata"
+
+; Loadable file data
+;
+            .byte   $58             ; CODOS loadable file header byte
+            .byte   $00             ; Memory overlay
+            .byte   $00             ; Memory bank
+            .byte   $00             ; Reserved
+            .addr   INITIO          ; Entry point
+            .addr   COL             ; Load address
+            .word   IODATA_SIZE     ; Memory image size
+
+            .export XC, YC, XX, YY, GMODE, DSHPAT, LSTKEY, YLNLIM, NOCLIK, CRSHAIR, SCSTEP
+            .export BSPACE, CANCEL
+
+COL:        .byte   $01             ; $0200 CURRENT COLUMN LOCATION OF TEXT CURSOR 1-80.
+LINE:       .byte   $01             ; $0201 CURRENT LINE NUMBER OF TEXT CURSOR. 1-NLINET.
+
+            ; Arguments to the graphics routines 
+            ;
+XC:         .word   $00             ; $0202 X coordinate of the graphic cursor position
+YC:         .word   $00             ; $0204 Y coordinate of the graphic cursor position
+XX:         .word   $00             ; $0206 X graphic coordinate "register"
+YY:         .word   $00             ; $0208 Y graphic coordinate "register"
+GMODE:      .byte   $80             ; $020A Graphic drawing mode, $00=move, $40=erase,
+                                    ;       $80=draw, $C0=flip. Add $20 for dashed lines
+DSHPAT:     .word   $F0F0           ; $020B Recirculating dashed line pattern,
+                                    ;       each 1 bit=dot on
+
+LSTKEY:     .byte   $00             ; $020D KEYBOARD KEY LAST DOWN
+RPTFLG:     .byte   $00             ; $020E FLAG USED BY AUTO REPEAT ALGORITHM
+KBECHO:     .byte   $00             ; $020F IF BIT 7=1 THEN "ECHO" EACH KEY TO THE DISPLAY.
+NOLFCR:     .byte   $00             ; $0210    IF BIT 7=1 THEN NO AUTOMATIC LINE FEED AFTER CR.
+NOSCRL:     .byte   $00             ; $0211 IF BIT 7=1 THEN INSTEAD OF SCROLLING, THE TEXT WINDOW IS CLEARED AND THE CURSOR IS HOMED WHEN TEXT GOES BEYOND THE BOOTOM LINE.
+UNDRLN:     .byte   $00             ; $0212    IF BIT 7=1 THEN ALL CHARACTERS UNDERLINED WHEN DRAWN.
+NOCLIK:     .byte   $00             ; $0213    IF BIT 7=1 THEN NO CLICK WHEN A KEY IS PRESSED.
+NOBELL:     .byte   $00             ; $0214 IF BIT 7=1 THEN BEL CHARACTER IS IGNORED.
+RVIDEO:     .byte   $00             ; $0215 IF BIT 7=1 THEN CHARACTERS ARE DRAWN IN REVERSE VIDEO.
+SHODEL:     .byte   $00             ; $0216    IF BIT 7=1 THEN DISPLAY DEL (ROBOUT) AS A CHARACTER SHAPE
+SHOUL:      .byte   $00             ; $0217    IF BIT 7=1 THEN CHARACTER CELL IS ERASED BEFORE THE UNDERLINE CHARACTER IS DRAWN.
+EXCCP:      .byte   $00             ; $0218 IF BIT 7=1 THEN CALL USER CONTROL CHARACTER PROCESSOR.
+EXTHI:      .byte   $00             ; $0219 IF BIT 7=1 THEN CALL USER RUTINE TO PROCESS ALL CHARACTERS WHEN BIT 7 SET.
+EXFONT:     .byte   $00             ; $021A    IF BIT 7=1 THEN USE EXTERNAL FONT TABLE.
+CURVIS:     .byte   $00             ; $021B FLAG INDICATING PRESENT STATE OF CURSOR
+CRSHAIR:    .byte   $00             ; $021C Flag. If Bit 7 = 1, the crosshair is activated
+CRSRWRAP:   .byte   $00             ; $021D FLAG INDICATING IF A CURSOR WRAP OCCURRED
+NLINET:     .byte   $12             ; $021E NUMBER OF TEXT LINES IN THE TEXT WINDOW.
+YTDOWN:     .byte   $00             ; $021F 255-(Y COORDINATE OF TOP OF THE TEXT WINDOW).
+DBCDLA:     .byte   $28             ; $0220 WAIT TIME IN MILLISECONDS ALLOWED FOR CONTACT BOUNCE.
+RPTRAT:     .byte   $C3             ; $0221 INTERCHARACTER REPEAT DELAY IN 256uS UNITS.
+CURDLA:     .byte   $01             ; $0222 DETERMINES CURSOR BLINK SPEED, 0=NO BLINK.
+SCSTEP:     .byte   $05             ; $0223 SHift+cursor step (pixels to advance)
+CLKPER:     .byte   $05             ; $0224 CLICK WAVEFORM PERIOD IN UNITS OF 200 MICROSECONDS.
+CLKVOL:     .byte   $20             ; $0225 CLICK VOLUME, $00 = MINIMUM, $7F = MAXIMUM.
+CLKCY:      .byte   $02             ; $0226 CLICK DURATION IN UNITS OF COMPLETE WAVEFORM CYCLES
+BELPER:     .byte   $05             ; $0227 BELL SOUND WAVEFORM PERIOD IN UNITS OF 200 MICROSECONDS.
+BELVOL:     .byte   $40             ; $0228    BELL SOUND VOLUME, $00 = MINIMUM, $7F MAXIMUM.
+BELCY:      .byte   $0C             ; $0229    BELL SOUND DURATION IN UNITS OF COMPLETE WAVEFORM CYCLES.
+BELL:       .byte   $07             ; $022A CTRL-G
+BSPACE:     .byte   $08             ; $022B CTRL-H
+TAB:        .byte   $09             ; $022C CTRL-I
+FFEED:      .byte   $0C             ; $022D CTRL-L
+CANCEL:     .byte   $12             ; $022E CTRL-X
+QEXCC:      .word   ERR37           ; $022F ADDRESS OF EXTERNAL CONTROL CHARACTER PROCESSOR IF USED.
+QEXFNT:     .word   ERR37           ; $0231 ADDRESS OF EXTERNAL FONT TABLE IF USED.
+QEXHI7:     .word   ERR37           ; $0233    ADDRESS OF EXTERNAL PROCESSOR FOR CHARACTERS WITH BIT 7=1
+FNTTBL:     .word   $D300 ;CHTB            ; $0235 CHARACTER FONT TABLE set $D300 for K-1008
+EXFTBK:     .byte   $00             ; $0237    MEMORY BANK NUMBER CONTAINING EXTERNAL FONT TABLE.
+YLNLIM:     .byte   $C0             ; $0238 LINE SIZE LIMIT FOR INLINE AND ENDLINE ENTRY POINTS
+NOLEKO:     .byte   $00             ; $0239    ECHO FLAG NORMALLY 0 BUT IF SET TO 80 WILL DISABLE KEYBOARD ECHO
+UKINLN:     .byte   $00             ; $023A IF BIT 7=1 THEN IRRECOGNIZED KEYS ARE ACCEPTED FOR ENTRY POINTS INLINE AND ENDLINE.
+SPKTBL:     .word   _SPKTBL         ; $023B KEYBOARD SPECIAL KEYS TABLE
+BKTBIDX:    .byte   $00             ; $023D Backtrack buffer index
+
+IODATA_SIZE = * - COL
+
+            .segment "iodrvjmp"
+
+            ; Loadable file data
+            ;
+            .byte   $58             ; CODOS loadable file header byte
+            .byte   $00             ; Memory overlay
+            .byte   $00             ; Memory bank
+            .byte   $00             ; Reserved
+            .addr   INITIO          ; Entry point
+            .addr   GETKEY          ; Load address
+            .word   JMPTBL_SIZE     ; Memory image size
+
+            .export GETKEY, OUTCH, TSTKEY, INITIO, CLRDSP, DRWLEG, INLINE, EDLINE
+            .export SDRAW, SMOVE, SDRAWR, SMOVER, SVEC, SVECR, SDOT, SDOTR, SGRIN
+            .export SLTPEN, SDRWCH, SISDOT, SOFFGC, SONGC, SINTLP, STSTLP, IFKEY
+            .export INITTW, DEFTW, CLRHTW, HOMETW, CRLF, CLRTW, CLRLEG, CLRTLN
+            .export LINEFD, OFFTCR, ONTCR, FLPTCR, TIOON, IORES, BEEP, ERR37
+
+GETKEY:     jmp     _GETKEY     ; Wait until a keyboard key is struck and return character in A
+OUTCH:      jmp     _OUTCH      ; Display printable character or interpret control character
+TSTKEY:     jmp     _TSTKEY     ; Test if a key is pressed
+INITIO:     jmp     _INITIO     ; Clear screen and set default values of display parameters
+
+CLRDSP:     jmp     _CLRDSP     ; Clear the entire VIDHRES by VIDVRES screen
+DRWLEG:     jmp     _DRWLEG     ; Draw legend boxes
+            jmp     ERR37
+ERR37:      jmp     JERROR37    ; Skips graphic routines if no graphic driver was loaded.
+                                ; If so appropriate JMPs are automatically updated.
+INLINE:     jmp     _INLINE     ; Input an entire line from the keyboard
+EDLINE:     jmp     _EDLINE     ; EDIT AN ENTIRE LINE USING THE KEYBOARD
+SDRAW:      jmp     ERR37       ; DRAW A SOLID VECTOR FROM THE CURSOR TO (XX,YY)
+SMOVE:      jmp     ERR37       ; MOVE GRAPHIC CURSOR TO (XX,YY) WITHOUT DRAWING
+SDRAWR:     jmp     ERR37       ; DRAW A SOLID WHITE VECTOR RELATIVE TO THE CURSOR
+SMOVER:     jmp     ERR37       ; MOVE THE GRAPHIC CURSOR RELATIVE TO ITS PRESENT POSITION
+SVEC:       jmp     ERR37       ; DRAW A VECTOR FROM THE CURSOR TO (XX,YY) ACCORDING TO GMODE AND DSHPAT
+SVECR:      jmp     ERR37       ; DRAW A VECTOR RELATIVE TO THE CURSOR ACCORDING TO GMODE AND DSHPAT
+SDOT:       jmp     ERR37       ; DRAW A SINGLE DOT (PIXEL) AT (XX,YY) ACCORDING TO GMODE
+SDOTR:      jmp     ERR37       ; DRAW A SINGLE DOT (PIXEL) AT A POSITION RELATIVE TO THE CURSOR ACCORDING TO GMODE
+SGRIN:      jmp     ERR37       ; ALLOW USER COORDINATE INPUT BY MANEUVERING A CURSOR WITH THE KEYBOAR CURSOR CONTROL KEYS
+SLTPEN:     jmp     ERR37       ; ACTIVATE LIGHT PEN FFOR ONE FRAME AND RETURN COORDINATES OF HIT, IF ANY
+            jmp     ERR37
+SDRWCH:     jmp     ERR37       ; DRAW A SINGLE CHARACTER AT (XX,YY)
+SISDOT:     jmp     ERR37       ; DETERMINE PIXEL AT (XX,YY) IS ON OR OFF
+SOFFGC:     jmp     ERR37       ; TURN OFF THE GRAPHIC CROSSHAIR CURSOR
+SONGC:      jmp     ERR37       ; TURN ON THE GRAPHIC CROSSHAIR CURSOR
+SINTLP:     jmp     ERR37       ; WAIT FOR END OF FRAME AND THEN ACTIVATE THE LIGHT PEN
+STSTLP:     jmp     ERR37       ; TEST FOR LIGHT PEN HIT AND RETURN COORDINATES IF A HIT
+            jmp     ERR37
+            jmp     ERR37
+            jmp     ERR37
+IFKEY:      jmp     _IFKEY      ; IFKEY - TEST IF A KEY IS PRESSED WITHOUT MULTIPLE RECOGNITION LOCKOUT
+INITTW:     jmp     _INITTW     ; INITTW - INITIALIZE THE TEXT WINDOW TO 24 LINES AND CLEAR THE TEXT WINDOW ONLY
+DEFTW:      jmp     _DEFTW      ; DEFTW - SET THE POSITION AND SIZE OF THE TEXT WINDOW
+CLRHTW:     jmp     _CLRHTW     ; CLRHTW - CLEAR THE TEXT WINDOW AND HOME THE CURSOR.
+HOMETW:     jmp     _HOMETW     ; HOMETW - PLACE THE CURSOR IN THE HOME POSITION (COL=1, LINE=1)
+CRLF:       jmp     _CRLF       ; CRLF - MOVE CURSOR TO THE LEFT SCREEN EDGE AND DOWN ONE LINE
+CLRTW:      jmp     _CLRTW      ; CLRTW - CLEAR THE TEXT WINDOW WITHOUT MOVING THE CURSOR
+CLRLEG:     jmp     _CLRLEG     ; CLRLEG - CLEAR THE LEGEND DISPLAY AREA (BOTTOMMOST 16 SCAN LINES)
+CLRTLN:     jmp     _CLRTLN     ; CLRTLN - CLEAR A SPECIFIED TEXT LINE
+LINEFD:     jmp     _LINEFD     ; LINEFD - MOVE CURSOR DOWN  ONE TEXT LINE
+OFFTCR:     jmp     _OFFTCR     ; OFFTCR - TURN THE TEXT CURSOR OFF IF IT IS ON
+ONTCR:      jmp     _ONTCR      ; ONTCR - TURN THE TEXT CURSOR ON
+FLPTCR:     jmp     _FLPTCR     ; FLPTCR - FLIP THE VIDEO SENSE OF THE CURSOR AT THE CURSOR POSITION
+
+TIOON:      jmp     _TIOON      ; SYSTEM ROUTINE TO FORCE I/O SELECTION
+IORES:      jmp     _IORES      ; SYSTEM ROUTINE TO RESTORE I-O/RAM SETTING
+BEEP:       jmp     _BEEP       ; SOUND AN AUDIBLE BEEP
+            jmp     ERR37
+            jmp     ERR37
+
+JMPTBL_SIZE = * - GETKEY
+
+            .segment "tabtbl"
+
+            ; Loadable file data
+            ;
+            .byte   $58             ; CODOS loadable file header byte
+            .byte   $00             ; Memory overlay
+            .byte   $00             ; Memory bank
+            .byte   $00             ; Reserved
+            .addr   INITIO          ; Entry point
+            .addr   TABTBL          ; Load address
+            .word   TABTBL_SIZE     ; Memory image size
+
+            .export TABTBL
+
+TABTBL:     .byte   $09, $11, $19, $21, $29, $31, $39, $41
+            .byte   $49, $00, $00, $00, $00, $00, $00, $00
+            .byte   $00, $00, $00, $00, $00, $00, $00, $00
+            .byte   $00, $00, $00, $00, $00, $00, $00, $00
+
+TABTBL_SIZE = * - TABTBL
+
+            .segment "iodriver"
+
+            ; Loadable file data
+            ;
+            .byte   $58             ; CODOS loadable file header byte
+            .byte   $00             ; Memory overlay
+            .byte   $00             ; Memory bank
+            .byte   $00             ; Reserved
+            .addr   INITIO          ; Entry point
+            .addr   SPKTRL          ; Load address
+            .word   IODRIVER_SIZE   ; Memory image size
+
+; Keyboard special keys with translation
+;
+SPKTRL:     .byte   $8A             ; '*' MULTIPLY
+            .byte   $2A             ; '*' MULTIPLY
+            .byte   $8B             ; '/' DIVIDE
+            .byte   $2F             ; '/' DIVIDE
+            .byte   $8C             ; '-' MINUS
+            .byte   $2D             ; '-' MINUS
+            .byte   $8D             ; '+' PLUS
+            .byte   $2B             ; '+' PLUS
+            .byte   $FF
+            .byte   $FF
+            .byte   $FF
+            .byte   $FF
+
+; Keyboard special keys
+;
+_SPKTBL:    .byte   $02             ; 'STX'
+            .byte   $03             ; 'ETX' (^C)
+            .byte   $05             ; 'ENQ' (^E)
+            .byte   $07             ; 'BEL'
+            .byte   $08             ; 'BS'  (^H)
+            .byte   $09             ; 'HT'  (^I)
+            .byte   $0A             ; 'LF'
+            .byte   $0B             ; 'VT'
+            .byte   $0C             ; 'FF'
+            .byte   $0D             ; 'RETURN'
+            .byte   $12             ; 'DC2'
+            .byte   $17             ; 'ETB'
+            .byte   $18             ; 'CAN'
+            .byte   $1A             ; 'SUB'
+            .byte   $1B             ; 'ESC'
+            .byte   $7F             ; 'DEL'
+            .byte   $8E             ; 'ENTER'
+            .byte   $A0             ; 'CURSOR UP'
+            .byte   $A1             ; 'CURSOR LEFT'
+            .byte   $A2             ; 'CURSOR RIGHT'
+            .byte   $A3             ; 'CURSOR DOWN'
+            .byte   $A4             ; 'HOME'
+            .byte   $A5             ; 'DELETE'
+            .byte   $A6             ; 'INSERT'
+            .byte   $B0             ; 'SHIFT/CURSOR UP'
+            .byte   $B1             ; 'SHIFT/CURSOR LEFT'
+            .byte   $B2             ; 'SHIFT/CURSOR RIGHT'
+            .byte   $B3             ; 'SHIFT/CURSOR DOWN'
+            .byte   $B4             ; 'SHIFT/ HOME
+            .byte   $FF
+            .byte   $FF
+SPKTBLSIZ = * - _SPKTBL
+
+; Special keys jump table
+;
+SPKJMP:     .addr   SKSTX           ; CTRL-B
+            .addr   CNTRLC          ; CTRL-C
+            .addr   SKENQ           ; ENQ (^E)
+            .addr   SKBEL           ; BEL
+            .addr   SKBS            ; BS  (^H)
+            .addr   SKHT            ; HT  (^I)
+            .addr   SKLF            ; LF
+            .addr   SKVT            ; VT
+            .addr   SKFF            ; FF
+            .addr   SKRET           ; RETURN
+            .addr   SKDC2           ; DC2
+            .addr   SKETB           ; ETB
+            .addr   SKCAN           ; CAN
+            .addr   SKSUB           ; SUB
+            .addr   SKESC           ; ESC
+            .addr   SKSUP           ; DEL
+            .addr   SKRET           ; ENTER
+            .addr   SKVT            ; CURSOR UP
+            .addr   SKBS            ; CURSOR LEFT
+            .addr   SKCSRR          ; CURSOR RIGHT
+            .addr   SKLF            ; CURSOR DOWN
+            .addr   SKHOME          ; HOME
+            .addr   SKDEL           ; DELETE
+            .addr   SKINS           ; INSERT
+            .addr   SKVT            ; SHIFT CURSOR UP
+            .addr   SKSCSRL         ; SHIFT CURSOR LEFT
+            .addr   SKSCSRR         ; SHIFT CURSOR RIGHT
+            .addr   SKLF            ; SHIFT CURSOR DOWN
+            .addr   SKFF            ; SHIFT HOME
+            .addr   $0000
+            .addr   $0000
+
+; INLINE - input an entire line from the keyboard, with editing permitted
+;
+; Arguments: None (QLN must be set)
+;
+; Arguments returned: A = number of characters in the line, Y = 0, X preserved
+;                     QLN points to the complted line
+;
+.proc _INLINE
+            ldy     #$00            ; Init line index
+            ; Fall through
+.endproc
+
+; EDLINE - Edit an entire line using the keyboard
+;
+; Arguments: Y=indexes the implied CR at the end of the line to be edited
+;            QLN (address $00F) points to start of line to be edited
+;
+; Arguments returned: A = number of characters in the line, Y = 0, X preserved
+;                     QLN points to the complted line
+;
+.proc _EDLINE
+            sty     NUMCHRS         ; Update number of chars
+            cld
+            lda     BKTBIDX         ; Get bactrack buffer index
+            sta     LSTBKTB         ; Set it as beginning of last line on buffer 
+            stx     XSAVLI          ; Preserve X
+UPDSCRN:    jsr     OUTLBUF         ; Output line buffer to screen
+CLRINSFLG:  lda     #$00            ; Clear insert flag
+            sta     INSFLAG         ;
+GKLOOP:     jsr     _GETKEY         ; Get key
+            cmp     #$7F            ; Printable?
+            bcs      SPECIAL        ; No, it is an special or function key
+            cmp     #' '            ; Maybe:
+            bcc     CHKSPCL         ; Character below space, go check special keys
+KNORMAL:    jsr     NKEYMNG         ; Normal character key
+            jmp     GKLOOP          ; And continue processing the input line
+
+SPECIAL:    beq     CHKSPCL         ; Char is $7F (DEL)
+            cmp     #$88            ; Check id it is a function key
+            bcs     CHKSPCL         ; No, check if special key
+            jsr     FNKEY           ; Yes, manage it
+            cmp     #$0D            ; Is it CR?
+            bne     GKLOOP          ; no, continue processing the input line
+CHKSPCL:    ldx     #SPKTBLSIZ-1    ; Search for the char into the SPKTBL
+CHKSPNX:    cmp     _SPKTBL,x       ; Found?
+            beq     FJMP            ; Yes, go jump to handler function
+            dex                     ; No, check next
+            bpl     CHKSPNX         ; Repeat until no more
+            ldx     #$0A            ; Now check if it is an special key with translation
+SPTLOOP:    cmp     SPKTRL,x        ; Match?
+            beq     TRNSLTE         ; Yes, translate to normal equivalent
+            dex                     ; No, advance to next entry
+            dex                     ;
+            bpl     SPTLOOP         ; Repeat until no more or match
+            bit     UKINLN          ; Unrecognized keys allowed?
+            bmi     KNORMAL         ; Yes, continue as normal key
+            bpl     GKLOOP          ; No, continue processing the input line
+FJMP:       txa                     ; Multiply by two for use in jump table
+            asl     a               ;
+            tax                     ;
+            lda     SPKJMP,x        ; Get function address
+            sta     FNJUMP          ;
+            lda     SPKJMP+1,x      ;
+            sta     FNJUMP+1        ;
+            jmp     (FNJUMP)        ; And jump
+TRNSLTE:    inx                     ; Advance to next pos in table (key equivalent)
+            lda     SPKTRL,x        ; Get the equivalent
+            jmp     KNORMAL         ; And continue as normal key
+.endproc
+
+; Internal procedure: Handle ^B command (Recall a previously typed line)
+;
+.proc SKSTX
+            jsr     LC817
+            jsr     LC926
+            jmp     _EDLINE::UPDSCRN
+.endproc
+
+; Internal procedure: Handle ^E command (Turn off/on echo of keyboard characters to CRT)
+;
+.proc SKENQ
+            lda     NOLEKO          ; Get "No keyboard echo" flag
+            eor     #$FF            ; Flip it
+            sta     NOLEKO          ; Store it back
+            jmp     _EDLINE::GKLOOP ; And continue processing the input line
+.endproc
+
+; Internal procedure: Handle BEL special character
+;
+.proc SKBEL
+            jsr     RNGBEL          ; Ring the bell
+            jmp     _EDLINE::GKLOOP ; And continue processing the input line
+.endproc
+
+; Internal procedure: Handle ^H (BS) special character
+;
+.proc SKBS
+            cpy     CURPOS      
+            beq     LC6A8
+            dey                     ; Decrement line index
+UPDC:       jsr     CURSORL         ; Move cursor left
+                                    ; Clear insert flag and continue processing
+            jmp     _EDLINE::CLRINSFLG
+
+LC6A8:      cpy     NUMCHRS         ; Are we at the end of the line?
+            beq     UPDC            ; Yes, update coordinates and continue processing
+            bne     BSHTRET         ; No, continue without updating coordinates
+            ; Not reached
+.endproc
+
+; Internal procedure: Handle ^I (horizontal tabulator)
+;
+.proc SKHT
+            jsr     HORIZTAB
+            ; Fall through
+.endproc
+
+; Common return for SKBS and SKHT
+;
+BSHTRET:                            ; Clear insert flag and continue processing
+            jmp     _EDLINE::CLRINSFLG
+
+; Internal procedure - Manage line feed key
+;
+.proc SKLF
+            tya                     ; Transfer cursor position to A
+            clc                     ; Clear Cy for addition
+            adc     #TXTHRES        ; Add line length
+            bcs     LC6C5           ; If overflows
+            cmp     NUMCHRS         ; Or past or equal last char in buffer
+            bcs     LC6C5           ; Yes, go update
+            tay                     ; Update line buffer index
+LC6BF:      jsr     _LINEFD         ; Line feed to screen
+            jmp     _EDLINE::CLRINSFLG ; Clear insert flag and continue processing
+
+LC6C5:      cpy     NUMCHRS         ; Last char of line?
+            bne     LC70D           ; No, it is past it
+            sty     CURPOS          ; Yes
+            jmp     LC6BF
+.endproc
+
+SKVT:       tya
+            sec
+            sbc     #TXTHRES
+            bcc     LC6E1
+            cmp     CURPOS
+            bcc     LC6E1
+            tay
+LC6DB:      jsr     LINEUP
+            jmp     _EDLINE::CLRINSFLG ; Clear insert flag and continue processing
+
+LC6E1:      cpy     NUMCHRS
+            bne     LC70D
+            sty     CURPOS
+            jmp     LC6DB
+
+SKFF:       jsr     _CLRHTW
+LC6EE:      sty     CURPOS
+            jmp     _EDLINE::CLRINSFLG ; Clear insert flag and continue processing
+
+; Internal procedure: Manage return/enter
+;
+; Arguments returned: A = number of characters in the line, Y = 0, X preserved
+;                     QLN points to the complted line
+;
+.proc SKRET
+            clc
+            ldy     NUMCHRS         ; Number of chars in input buffer
+LC6F7:      lda     #$0D            ; Insert a CR at the end of the line
+            sta     (QLN),y         ;
+            php                     ; Preserve flags
+            jsr     OUTCIFEON       ; Output CR to screen if echo is not disabled
+            jsr     LC8F7
+            plp                     ; Restore flags
+            tya                     ; Number of chars of last line to A
+            ldy     #$00            ; New line, index = 0
+            ldx     XSAVLI          ; Restore X
+            rts
+.endproc
+
+SKDC2:      jsr     OUTLBUF
+LC70D:      jmp     _EDLINE::CLRINSFLG ; Clear insert flag and continue processing
+
+; Internal procedure: Manage ^W (delete to end-of-line) command
+;
+.proc SKETB
+            jsr     DELTOEOL
+            jmp     _EDLINE::CLRINSFLG ; Clear insert flag and continue processing
+.endproc
+
+SKCAN:      jsr     LC817
+            jmp     _EDLINE::CLRINSFLG ; Clear insert flag and continue processing
+
+SKSUB:      cpy     #$00
+            bne     LC70D
+            beq     SKRET::LC6F7
+SKESC:      jsr     _GETKEY
+            jmp     _EDLINE::KNORMAL
+
+; Internal procedure - Manage SUP key
+;
+.proc SKSUP
+            jsr     KSUPR
+            jmp     _EDLINE::GKLOOP
+.endproc
+
+; Unused, it is exactly the same as SKDEL
+;
+.proc SKDEL2
+            jsr     LC849
+            jmp     _EDLINE::GKLOOP
+.endproc
+
+SKCSRR:     cpy     NUMCHRS
+            bcs     LC73F
+            iny
+LC739:      jsr     CURSORR
+            jmp     _EDLINE::CLRINSFLG ; Clear insert flag and continue processing
+
+LC73F:      cpy     CURPOS
+            beq     LC739
+            bne     LC70D
+SKHOME:     jsr     _HOMETW
+            jmp     LC6EE
+
+SKDEL:      jsr     LC849
+            jmp     _EDLINE::GKLOOP
+
+; Internal procedure: Manage INS key. Set the insert flag.
+;
+SKINS:      sec                     ; Set insert flag
+            ror     INSFLAG         ;
+            jmp     _EDLINE::GKLOOP ; And continue processing the input line
+
+; Internal procedure: Move cursor to first character of current line
+;
+SKSCSRL:    lda     CURPOS
+            sta     SAVIDX
+            jsr     GOSAVIDX        ; Move cursor left from current pos in Y to SAVIDX
+            jmp     _EDLINE::CLRINSFLG ; Clear insert flag and continue processing
+
+; Internal procedure: Move cursor to last character of current line
+;
+SKSCSRR:    cpy     NUMCHRS
+            beq     LC70D
+            jsr     CURSORR
+            iny
+            bne     SKSCSRR
+            ; Fall through
+
+; Internal procedure - Manage normal keys
+;
+.proc NKEYMNG
+            cpy     YLNLIM          ; Reached line limit?
+            bcc     NOEND           ; No, continue
+            jmp     RNGBEL          ; Yes, ring the bell and return
+
+NOEND:      bit     INSFLAG         ; Check insert flag
+            bpl     NOINS           ; No, continue
+            jmp     INSCHAR         ; Yes, jump to insert
+
+NOINS:      sta     (QLN),y         ; Save char into input line buffer
+            cpy     NUMCHRS         ; Are we past the last char in buffer?
+            bcc     ADVANCE         ; No, go to advance pos
+            inc     NUMCHRS         ; Yes, increment number of chars
+ADVANCE:    iny                     ;
+            ; Fall through
+.endproc
+
+; Internal procedure - Output char to screen if echo is not disabled
+;
+.proc OUTCIFEON
+            bit     NOLEKO          ; Check keyboard echo flag
+            bmi     NOECHO          ; If no echo, skip
+            jmp     OUTCH           ; Echo on, output the character
+NOECHO:     jmp     CURSORR         ; Advance cursor to the right and return
+.endproc
+
+; Internal procedure - del character at cursor position
+;
+.proc KSUPR
+            cpy     CURPOS
+            beq     RETURN
+            bit     INSFLAG
+            bpl     LC7A4
+            jsr     CURSORL         ; Move cursor left
+            dey
+            jmp     LC849
+
+LC7A4:      cpy     NUMCHRS
+            bcc     LC7AA
+            dec     NUMCHRS
+LC7AA:      dey
+            jsr     CURSORL         ; Move cursor left
+            lda     #$20
+            sta     (QLN),y
+            jsr     OUTCIFEON
+            jsr     CURSORL         ; Move cursor left
+RETURN:     rts
+.endproc
+
+.proc DELTOEOL
+            sty     SAVIDX          ; Store current index to temp variable
+LOOP:       cpy     NUMCHRS         ; Have we reached end of line?
+            bcs     LC7C8           ; Yes, ...
+            lda     #' '            ; No, overwrite with blank
+            jsr     OUTCIFEON       ;
+            iny                     ; Advance position
+            bne     LOOP            ; And repeat (will always jump)
+LC7C8:      jsr     GOSAVIDX        ; Move cursor left from current pos to SAVIDX
+            sty     NUMCHRS
+            rts
+.endproc
+
+; Internal procedure: Advance to next tabulator stop
+;
+.proc HORIZTAB
+            sty     SAVIDX          ; Save index to temporary var
+            ldx     #$00            ; Find next tab stop position
+LOOP:       lda     TABTBL,x        ; Get tab stop
+            beq     UPDIDRET        ; If 0, no more
+            tay                     ; Transfer to Y
+            dey                     ; And decrement to compare with current position
+            cpy     SAVIDX          ; If current pos >= tab stop, check next tabstop
+            beq     NEXT            ;
+            bcc     NEXT            ;
+            cpy     YLNLIM          ; Is tab stop past the line limit?
+            bcs     UPDIDRET        ; Go update index and return
+            tya                     ; Get current index into Y
+            ldy     SAVIDX          ;  then update SAVIDX with tab stop
+            sta     SAVIDX          ;  position
+ADVPOS:     cpy     NUMCHRS         ; Compare current index with number of chars
+            bcs     PRTAB           ;   at or beyond number of chars, go print spaces
+            cpy     SAVIDX          ; Compare current index with tab stop position
+            bcs     RETURN          ;   at or beyond tab stop, just return
+            jsr     CURSORR         ;   before, advance 1 pos right
+            iny                     ; Increment current index
+            bne     ADVPOS          ; And repeat (will always jump)
+PRTAB:      lda     #' '            ; Print spaces until tab stop
+            cpy     SAVIDX          ; Have we reached the tab stop position?
+            bcs     UPDNCRET        ; Go update number of chars and return
+            jsr     OUTCIFEON       ; Output to screen if echo enable
+            sta     (QLN),y         ; Store into buffer
+            iny                     ; Advance pos
+            bne     PRTAB           ; And repeat (will always jump)
+UPDNCRET:   sty     NUMCHRS         ; Uppate number of chars
+RETURN:     rts
+
+NEXT:       inx                     ; Next tab stop
+            cpx     #TABTBL_SIZE    ; Repeat until end of table
+            bcc     LOOP            ;
+UPDIDRET:   ldy     SAVIDX          ; Set index to new value and return
+            rts
+.endproc
+
+.proc LC817
+            lda     CURPOS          ; Get current char position
+            sta     SAVIDX          ; and store it
+            jsr     GOSAVIDX        ; Move cursor left from current pos in Y to SAVIDX
+            lda     #' '
+LOOP:       cpy     NUMCHRS
+            bcs     LC82C           ; If we've reached the end of line
+            jsr     OUTCIFEON
+            iny
+            bne     LOOP
+LC82C:      jsr     GOSAVIDX        ; Move cursor left from current pos in Y to SAVIDX
+            ldy     #$00
+            sty     CURPOS
+            sty     NUMCHRS
+            rts
+.endproc
+
+; Internal procedure - Output line buffer to screen and init current
+;
+.proc OUTLBUF
+            ldy     #$00            ; Reset cursor position
+            sty     CURPOS          ;
+LOOP:       cpy     NUMCHRS         ; Have we reached the number of chars?
+            beq     RETURN          ; Yes, return
+            lda     (QLN),y         ; No, get char from line buffer
+            jsr     OUTCIFEON       ; Echo (if set) and advance cursor right
+            iny                     ; Next char
+            bne     LOOP            ; Loop until current pos
+RETURN:     rts
+.endproc
+
+LC849:      cpy     NUMCHRS
+            bcs     LC86B
+            sty     SAVIDX
+LC850:      iny
+            cpy     NUMCHRS
+            bcs     LC861
+            lda     (QLN),y
+            dey
+            sta     (QLN),y
+            iny
+            jsr     OUTCIFEON
+            jmp     LC850
+
+LC861:      lda     #$20
+            jsr     OUTCIFEON
+            dec     NUMCHRS
+            jsr     GOSAVIDX        ; Move cursor left from current pos in Y to SAVIDX
+LC86B:      rts
+
+INSCHAR:    sta     L02D3           ; Save char
+            sty     SAVIDX          ; And current index
+            ldy     NUMCHRS         ; Get number of chars in buffer
+            cpy     YLNLIM          ; Line full?
+            bcc     LC87F           ; No, continue
+            jsr     RNGBEL          ; Yes, ring the bell
+            jmp     RSTRIDX         ; Restore index and return
+
+LC87F:      cpy     SAVIDX
+            beq     LC88D
+            dey
+            lda     (QLN),y
+            iny
+            sta     (QLN),y
+            dey
+            bne     LC87F
+LC88D:      inc     NUMCHRS
+            lda     L02D3
+            sta     (QLN),y
+LC894:      lda     (QLN),y
+            jsr     OUTCIFEON
+            iny
+            cpy     NUMCHRS
+            bcc     LC894
+            inc     SAVIDX
+            ; Fall through
+
+; Internal procedure: Move cursor left from current pos in Y to SAVIDX
+;
+.proc GOSAVIDX
+            tya                     ; Transfer current index to A
+            sec                     ; Clear borrow for substraction
+            sbc     SAVIDX          ; Substract initial index pos
+            tax                     ; Transfer to X
+            beq     RSTRIDX         ; If same pos, go to restore index and return
+LEFT:       jsr     CURSORL         ; Move cursor left X positions
+            dex                     ;
+            bne     LEFT            ;
+            ; Fall through
+.endproc
+
+; Internal procedure: restore index into Y and return
+;
+.proc RSTRIDX
+            ldy     SAVIDX
+            rts
+.endproc
+
+; Internal procedure - Manage function key
+;
+.proc FNKEY
+            and     #$7F            ; Clear bit 7
+            asl     a               ; Multiply by 32 (KEYSTR table entries are 32
+            asl     a               ;   bytes long)
+            asl     a               ;
+            asl     a               ;
+            asl     a               ;
+            tax                     ; Transfer to index X
+            stx     FSTCHAR         ; Save index to first char of current index
+            clc                     ; Clear carry for addition
+            adc     #$20            ; Calculate last char of entry
+            sta     LSTCHAR           ;   and store it
+CKCHAR:     lda     KEYSTR,x        ; Get substitution string char
+            cmp     #$20            ; Check if printable
+            bcc     PRSTR           ; No, ...
+            cmp     #$80            ;
+            bcs     PRSTR           ; No, ..
+            inx                     ; Next char
+            cpx     LSTCHAR         ; Last char?
+            bne     CKCHAR          ; No, repeat
+PRSTR:      ror     NOLEKO          ; Enable echo if disabled 
+            stx     LSTCHAR         ; Update LSTCHAR with first non-printable char
+            ldx     FSTCHAR         ; Get FSTCHAR
+PRCHR:      cpx     LSTCHAR         ; Current char >= LSTCHAR?
+            bcs     LC8EC           ; Yes, we're done
+            lda     KEYSTR,x        ; No, get char
+            jsr     NKEYMNG         ; And print it
+            inx                     ; Next char
+            bne     PRCHR           ; Always jump
+LC8EC:      lda     KEYSTR,x        ; Get first non-printable
+            and     #$7F            ; Clear bit 7
+            cmp     #$0D            ; Seems redundant, and it is also checked on return
+            asl     NOLEKO          ; Restore echo status
+            rts
+.endproc
+
+LC8F7:      jsr     SETBCKTA
+            ldy     #$FF
+LC8FC:      iny
+            lda     (QLN),y
+            tax
+            sty     SAVIDX
+            ldy     BKTBIDX
+            iny
+            jsr     SWTBANK1        ; Turns on I-O address space and switches to bank 1
+            txa
+            sta     (VRAMDST),y
+            jsr     RSTBANK0        ; Restores Bank 0 and turns on RAM at BE00-BFFF
+            sty     BKTBIDX
+            ldy     SAVIDX
+            cpy     NUMCHRS
+            bne     LC8FC
+            rts
+
+; Internal procedure: Set backtrack buffer address
+;
+.proc SETBCKTA
+            lda     #<BCKTRBUF      ; Set bactrack buffer address
+            sta     VRAMDST         ;
+            lda     #>BCKTRBUF      ;
+            sta     VRAMDST+1       ;
+            ldy     #$FF            ; And this is useless as Y is always set after
+            rts                     ; calling
+.endproc
+
+LC926:      sty     SAVIDX
+            jsr     SETBCKTA
+            ldy     LSTBKTB
+LC92F:      dey
+            cpy     BKTBIDX
+            beq     LC92F
+            jsr     SWTBANK1        ; Turns on I-O address space and switches to bank 1
+            lda     (VRAMDST),y
+            cmp     #$FF
+            bne     LC947
+            lda     BKTBIDX
+            sta     LSTBKTB
+            jmp     LC94E
+
+LC947:      cmp     #$0D
+            bne     LC92F
+            sty     LSTBKTB
+LC94E:      sty     L02DB
+LC951:      iny
+            jsr     SWTBANK1        ; Turns on I-O address space and switches to bank 1
+            lda     (VRAMDST),y
+            tax
+            jsr     RSTBANK0        ; Restores Bank 0 and turns on RAM at BE00-BFFF
+            sty     L02DB
+            ldy     SAVIDX
+            txa
+            sta     (QLN),y
+            cmp     #$0D
+            beq     LC972
+            iny
+            sty     SAVIDX
+            ldy     L02DB
+            jmp     LC951
+
+LC972:      sty     NUMCHRS
+            rts
+
+;			'CONSOLE I-O: KEYBOARD ROUTINES'
+;
+;			**********************************************************************************************************
+;
+;			SUBROUTINE GETKEY: WAIT FOR KEYBOAR DEPRESSION, RETURN
+;			ASCII CODE FOR KEY.
+;
+;			ON ENTRY: NO ARGUMENTS.
+;			
+;			ON RETURN: A=ASCII CODE FOR DEPRESSED KEY (OR SPECIAL KEY
+;			CODE FOR NON-ASCII KEYS); X,Y PRESERVED.
+;
+;			NOTES:
+;			THIS SUBROUTINE SCANS AN UNENCODED KEYBOARD MATRIX CONNECTED
+;			TO THE KIM-1 APLICATION PORT A CONNECTOR.
+;			ENTRY POINT GETKEY SITS IN A LOOP WAITING FOR A KEY TO
+;			BE PRESSED. WHEN A KEY IS PRESSED (EXCEPTING SHIFT, CONTROL,
+;			REPEAT), THE ROUTINE RETURNS WITH KEY CODE IN ACCUMULATOR.
+;
+;			THIS ROUTINE IMPLEMENTS TRUE 2-KEY ROLLOVER, KEY DEBOUNCING.
+;			CAPS LOCK IS SUPPORTED; IT ONLY AFFECTS LETTERS.
+;
+;			DEBOUNCE DELAY IS AN ALTERNABLE PARAMETER. THE DEBOUNCE 
+;			DELAY IS DBCDLA+5 MILLISECONDS. PARAMETERS
+;			ARE SIGNED INTEGERS. DEFAULT VALUE IS ASSUMED TO BE 0.
+;
+;			CONTINOUSLY SCAN KEYBOARD UNTIL A KEY IS PRESSED.
+;
+;			NOTE: THE ENTRY POINT FOR "GETKEY" IS IN THE JUMP TABLE.
+;			**********************************************************************************************************
+
+;_GETKEY:									;TEST LOOP SCAN INFINITY UNTIL FOUND NORMAL KEY PRESSED
+;	STX XSVKB								;SAVE REGISTERS
+;	STY YSVKB
+;	JSR _ONTCR          					;DISPLAY CURSOR
+;	AGAIN:
+;	JSR SCANKEY
+;	CMP #$00								;CHECK IS ASCII CODE IN A OR CHECK KEYBOARD UNTIL FOUND ONE KEY PRESSED.
+;	BEQ AGAIN								;SCAN CONTINOUSLY UNTIL KEY IS FOUND
+;	LDY YSVKB								;RECOVER REGISTERS AND GO BACK WITH KEY ASCII CODE IN A.
+;	LDX XSVKB
+;RTS
+
+_GETKEY:									;TEST LOOP SCAN INFINITY UNTIL FOUND NORMAL KEY PRESSED
+	STX XSVKB								;SAVE REGISTERS
+	STY YSVKB
+GETK1A:    	JSR _ONTCR						;DISPLAY CURSOR
+GETK1B:    	LDA #$00               	
+			STA TCURS						;CLEAR LOW BYTE OF COUNTER    	
+			LDA CURDLA						;RECALL CURSOR DELAY DESIRED
+			LSR A                   		;DIVIDE BY 2
+			ROR TCURS      				
+			STA TCURS+1             		;INITIALIZE COUNT 
+AGAIN:
+		JSR SCANKEY
+		BNE GETK1							;KEY WAS FOUND AND A CONTAINS ASCII VALUE
+			LDA TCURS              			;OTHERWISE HANDLE CURSOR FLASH    
+			BNE GETK2A              		;BRANCH IF NO BORROW ON CLOCK REMAINING    
+			DEC TCURS+1             		;DECREMENT HI BYTE OF CLOCK REMAINING    
+			BPL GETK2A    					;BRANCH IF TIME REMAINS ON CLOCK               
+			BIT CURVIS              		;TEST "CURSOR VISIBLE" FLAG
+			BPL GETK1A              		;IF NOT VISIBLE, GO MAKE IT VISIBLE    
+			LDA CURDLA
+			BEQ AGAIN         				;IF NO BLINKING WANTED, BRANCH         
+			JSR _OFFTCR						;ELSE FLIP IT TO VISIBLE
+			JMP GETK1B              		;AND RESTART BLINK TIMER
+GETK2A:    	DEC TCURS               		;DECREMENT TIME LEFT TILL CURSOR "BLINKS" 
+			JMP AGAIN
+GETK1:
+	PHA	
+		JSR _OFFTCR							;ENSURE THAT CURSOR IS OFF	      
+		JSR CLICK							;SOUND AUDIO "CLICK" TO ACKNOWLEDGE KEY
+	PLA
+		BIT KBECHO							;TEST "KEYBOARD ECHO' FLAG 	;ECHO DONE THROUGH 
+		BPL GETK2                   		;BRANCH IF NO ECHO WANTED	;RECEIVED DATA BUFFER
+		JSR _OUTCH							;ELSE ECHO KEY
+GETK2:
+	LDY YSVKB								;RECOVER REGISTERS AND GO BACK WITH KEY ASCII CODE IN A.
+	LDX XSVKB
+RTS
+
+;			**********************************************************************************************************
+;
+;		SUBROUTINE SCANKEY: SCAN KEYBOARD ONCE AND RETURN ASCII CODE IN A OR #$00 IF NO KEY WAS FOUND
+;
+;			**********************************************************************************************************
+
+SCANKEY:									;SCANS KEYBOARD ONCE AND GO OUT WITH 00 OR WITH ASCII KEY CODE IN A
+;USER IO PORT INITIALIZATION FOR SCANNING KEYBOARD
+	JSR SETIO								;SET INPUT OUTPUT PORT FOR KEYBOARD
+;RESET MODIFIERS TO CHECK THEM WITH KEY PRESSED
+	LDA RPTFLG								;LEAVE JUST CAPS LOCK KEY WITH NO CHANGE AND CLEAR MODIFY KEYS FOR NEXT SCAN.
+	AND #$01								;LEAVE CAPS_LOCK BIT INTACT
+	STA RPTFLG
+
+	LDX #$00								;RESET POINTER FOR CHECKING SPECIAL KEYS
+		CHECK_LOOP:
+		LDA SKEY,X							;CHECK SPECIAL KEYS
+		STA PORTA							;STORE KEY POSITION TO CHECK
+		LDA PORTA							;CHECK KEY WAS PRESSED?
+		AND #$80							;CHECK KEY WAS PRESSED - LOW INPUT '0' FOR SELECTED OUTPUT KEY POSITION 
+		BNE SKIP_STORE						;NOTHING FOUND
+		JSR DELAY_MS						;FOUND SOMETHING SO DEBOUNCE TO MAKE SURE IT WAS PRESSED
+		LDA PORTA							;CHECK AGAIN SAME KEY
+		AND #$80							;CHECK IF KEY IS STILL PRESSED
+		BNE SKIP_STORE						;IF NOT GET NEXT KEY POSITION
+		TXA									;CHECK CAPS_LOCK KEY AS IT WORKS AS ON/OFF KEY ONLY
+		CMP #$03							;CAPS_LOCK KEY SUPPORT
+		BNE DONT_SET_CAPS
+			RELASE:							;WAIT UNTIL CAPS LOCK KEY WAS RELEASED IF IT WAS PRESSED
+			JSR DELAY_MS					;DEBOUNCE
+			LDA PORTA
+			AND #$80
+			BEQ RELASE						;CHECK CAPS_LOCK RELASE STATUS
+				LDA RPTFLG					;SPECIAL KEYS STATUS - CONSIST OF SHIFTS, CAPS_LOCK, CONTROL, REPEAT-CURRENTLY NOT USED
+				EOR #$01 					;IF CAPS_LOCK WAS EALIER ON THAN TURN IT OFF, IF WASN'T TURN IT ON.
+				STA RPTFLG					;UPDATE CAPS LOCK INFO
+		JMP SKIP_STORE						;END OF CAPS LOCK LOCKING FUNCTION
+	DONT_SET_CAPS:							;DON'T CHANGE CAPS LOCK STATUS
+	LDA BITS,X								;KEY WAS PRESSED SO SET PROPER MODIFIER TO REMEMBER THAT STATE ONLY VALID FOR THAT SCAN (SHIFTS, CONTROL KEYS)
+	ORA RPTFLG
+	STA RPTFLG								;SAVE STATUS OF SHIFTS/CONTROL
+
+SKIP_STORE:									;SKIP IF NO KEY PRESSED WAS FOUND
+	INX
+	CPX #$04
+	BNE CHECK_LOOP							;CHECK ALL SPECIAL KEYS
+
+;MODIFIER KEYS WAS CHECKED SO CHECK RESET OF KEYBOARD
+
+	LDX #$00								;RESET INDEX X FOR SCANNING ALL KEYS 
+	RANGE_LOOP:
+	TXA										;CHECK SPECIAL KEYS TO SKIP
+	CMP #$39								;RIGHT SHIFT
+	BEQ NEXT_VALUE
+	CMP #$3D								;CONTROL
+	BEQ NEXT_VALUE
+	CMP #$54								;CAPS LOCK
+	BEQ NEXT_VALUE
+	CMP #$57								;LEFT SHIFT
+	BEQ NEXT_VALUE
+
+	STA PORTA								;SET POSITION FOR NORMAL KEY
+	LDA PORTA								;CHECK IF SET KEY WAS PRESSED
+	AND #$80
+	BNE NEXT_VALUE							;NO KEY WAS PRESSED SO GO FO NEXT ONE
+	JSR DELAY_MS							;IF KEY WAS FOUND PRESSED DEBOUNCE IT
+	LDA PORTA
+	AND #$80
+	BNE NEXT_VALUE							;IF IT WAS FAKE SIGNAL GO CHECK NEXT KEY
+
+;IF KEY WAS STILL PRESSED ASSUME IS PRESSED SO CHECK WHEN IT WILL BE RELESED - 
+
+;	WAITMORE:
+;	JSR DELAY_1MS							;SOME DEBOUNCING
+;	LDA PORTA
+;	AND #$80
+;	BEQ WAITMORE							;KEY WAS RELESED SO WE CAN CHECK FUTHER
+	STX LSTKEY								;STORE FOUND KEY SCAN CODE
+
+;======================================================================================================
+	INC LSTKEY								;TO LEAVE 00 FREE FOR NO KEY IF 00 KEY CODE WAS PROCESSED.=
+;======================================================================================================
+	
+;DECODE ASCII CODE FOUND
+;CHECK MODIFIERS KEY FIRST	
+	LDA RPTFLG
+	CMP #$00
+	BEQ LOWER_CASE
+	CMP #$01								;CAPS LOCK - UPPER CASE LETTERS ONLY
+	BEQ CAPS
+	CMP #$02								;RIGHT SHIFT - ALL UPPER CASE
+	BEQ UPPER_CASE
+	CMP #$03								;CAPS LOCK AND SHIFT PRESSED - BUT ALTERNATIVE CHARACTERS
+	BEQ LOWER_CASEA
+	CMP #$04								;LEFT SHIFT - ALL UPPER CASE
+	BEQ UPPER_CASE
+	CMP #$05								;CAPS LOCK AND SHIFT PRESSED - BUT ALTERNATIVE CHARACTERS
+	BEQ LOWER_CASEA
+	CMP #$06								;BOOTH SHIFTS SOMEHOW - NO CAPS LOCK... SAME AS SHIFT
+	BEQ UPPER_CASE
+	CMP #$07								;NO CAPS LOCK - BOOTH SHIFT WAS PRESSED SOMEHOW? - ALTERNATIVE CHARACTERS
+	BEQ LOWER_CASEA
+	CMP #$08								;CONTROL KEY SUPPORT - SHIFT AND CAPS LOCK DOESN'T MATTER 
+	BCS CKEY
+
+NEXT_VALUE:									;SKIP TO NEXT KEY POSITION
+	INX
+	CPX #$60								;KEY MATRIX RANGE 00-5F
+	BNE RANGE_LOOP
+	LDA #$00								;NO KEY WAS FOUND THIS TIME
+RTS											;END OF KEYBOARD SCAN WITHOUT FOUND ANYTHING PRESSED
+
+;			**********************************************************************************************************
+;
+;						CONVERT KEY FOUND TO ASCII VALUE WITH PROPER MODIFIERS
+;
+;			**********************************************************************************************************
+
+;CAPS LOCK FUNCTION SWITCH - ONLY LETTERS ARE AFFECTED HERE IF NO SHIFT WAS PRESSED
+CAPS:
+	LDA ASCII_MASK,X
+	CMP #$61
+	BCC NOT_AFFECTED
+	CMP #$7B
+	BCS NOT_AFFECTED
+;UPPER CASE ASCII WITH SHIFTS PRESSED
+UPPER_CASE:
+	LDA SHIFT_MASK,X
+NOT_AFFECTED:
+RTS
+
+;LOWER CASE ASCII - SHIFT+CAPS LOCK WAS PRESSED SO LOWER CASE LETTERS - ALTERNATIVE CHARACTERS ON
+LOWER_CASEA:
+	LDA SHIFT_MASK,X
+	CMP #$41
+	BCC NOT_AFFE2
+	CMP #$5B
+	BCS NOT_AFFE2
+;LOWER CASE ASCII - STANDARD KEYBOARD WITHOUT MODIFIERS
+LOWER_CASE:
+	LDA ASCII_MASK,X
+NOT_AFFE2:
+RTS
+
+;CONTROL KEY FUNCTIONS
+CKEY:
+	LDA ASCII_MASK,X
+	AND #$1F
+RTS											;GO BACK WITH ASCII KEY IN A OR CONTROL KEY
+
+;			**********************************************************************************************************
+;
+;													DEBOUNCING LOOP	
+;					DEBOUNCE 1MS - DEFAULT VALUE BUT COULD BE INCREMENDED BY DBCDLA IN 1MS INCREMENTS
+;
+;			**********************************************************************************************************
+
+DELAY_MS:
+	PHA										;SAVE A
+	TXA
+	PHA										;SAVE X
+	LDA DBCDLA								;LOAD DELAY VALUE
+	BNE DELAY_CALC
+	LDA #$01
+	STA DBCDLA
+DELAY_CALC:									;DELAY LOOP
+	TAX
+	OUTER_LOOP:
+			LDY #$C8
+			INNER_LOOP:
+			NOP
+			NOP
+			NOP
+			DEY
+			BNE INNER_LOOP
+			DEX
+	BNE OUTER_LOOP
+	PLA										;RECOVER X
+	TAX
+	PLA										;RECOVER A
+RTS											;DEBOUNCING DONE
+
+;		***********************************************************************
+;
+;		SUBROUTINE IFKEY: TEST KEY WITHOUT ROLLOVER
+;
+;		THIS ROUTINE IS SIMILAR TO TSTKEY BELOW IN ALL ASPECTS EXCEPT
+;		THAT IF THE PREVIOUS KEY IS STILL DOWN, IT IS RETURNED WITH
+;		THE CARRY FLAG SET.
+;
+_IFKEY:
+	LDA #$00								;CLEAR LAST SEEN KEY
+	STA LSTKEY
+	;FALL THROUGH
+
+;
+;
+;		...FALLS THROUGHT TO TSTK...*
+;
+;		***********************************************************************
+;
+;		SUBROUTINE TSTKEY: TEST FOR KEY DEPRESSION (WITH ROLLOVER).
+;
+;		ON ENTRY: NO ARGUMENTS.
+;
+;		ON RETURN: CARRY FLAG IS "KEY IS PRESSED" FLAG (CARRY CLEAR IF NO
+;		KEY IS DOWN OR IF THE SAME KEY IS STILL DOWN); IF CARRY SET, THEN
+;		CHARACTER IS IN A;
+;		X, Y ARE PRESERVED
+;
+;		NOTE: SCANS THE KEYBOARD JUST ONCE.
+;
+;		NOTE: ENTRY POINT "TSTKEY" IS IN THE JUMP TABLE.
+
+;SCAN KEYBOARD ONCE - IF ANY KEY WAS PRESSED GO BACK WITH CARRY SET, NO KEY CLEAR CARRY BIT
+_TSTKEY:
+	STX XSVKB								;SAVE REGISTERS
+	STY YSVKB  
+;USER IO PORT INITIALIZATION FOR SCANNING KEYBOARD JUST TO BE SURE WAS SET
+	JSR SETIO
+
+;CHECK IF THERE WAS A KEY PRESSED TO CHECK	
+	LDA LSTKEY								;00-5F SCAN KEY CODE+1 TO LEAVE 00 AS NO PREVIOUS KEY
+	BEQ NO_KEY								;IF THERE WAS NO KEY PRESSED BEFORE SKIP FOR SEARCH NEW ONE
+	DEC LSTKEY								;IF KEY WAS PRESSED BEFORE RECOVER PROPER SCAN CODE NOW (01-60 TO 00-5F)
+	LDA LSTKEY								;IF THERE WAS KEY PRESSED CHECK IT NOW AGAIN
+	STA PORTA								;CHECK PREVIOUS KEY STATUS
+	LDA PORTA								;CHECK IF KEY IS STILL PRESSED
+	AND #$80	
+	BNE NO_KEY								;NOTHING FOUND SO CHECK OTHER KEYS
+
+;SAME KEY WAS FOUND SO CLEAR CARRY FLAG AND OUTPUT SAME ASCII VALUE IN A.
+	JSR SCANKEY								;ASSUMES SAME KEY STILL PRESSED IT WILL RETURN SAME DATA
+SAMEKEY:
+	LDY YSVKB								;RECOVER REGISTERS NOW
+	LDX XSVKB
+	CLC										;SET NO CARRY AS NO KEY IS PRESSED A=#$00 OR SAME KEY WAS STILL PRESSED
+RTS
+
+NO_KEY:										;NO PREVIOUS KEY DETECTED TO LOOK FOR, SO LOOK FOR NEW ONE	
+	JSR SCANKEY								;SCAN KEYBOARD ONCE TO CHECK IS THERE ANY KEY PRESSED
+	CMP #$00								;CHECK IS THERE ASCII CODE IN A
+	BEQ SAMEKEY								;THERE WAS SOME CODE SO GO OUT
+	LDY YSVKB								;ASCII KEY IN A AND SCAN CODE IN LSTKEY AND CARRY BIT SET
+	LDX XSVKB
+	SEC										;SET CARRY AS THERE IS KEY PRESSED WITH A=ASCII KEY CODE
+RTS
+
+SETIO:
+	LDA #%01111111							;SET 1 INPUT, 7 OUTPUTS
+	STA DDR									;WRITE SETTINGS TO DDR
+RTS
+
+;SPECIAL KEYS VALUES
+SKEY:
+.BYTE $39									;RIGHT SHIFT
+.BYTE $57									;LEFT SHIFT
+.BYTE $3D									;CONTROL
+.BYTE $54									;CAPS LOCK
+;NO REPEAT KEY FOR NOW
+
+;SPECIAL KEYS MODIFIERS FOR PRESSED KEYS - ONLY CAPS LOCK STATE WILL REMAIN INTACT ON START
+BITS:
+;.BYTE #$01									;RESERVED FOR CAPS_LOCK SUPPORT
+.BYTE $02									;RIGHT SHIFT
+.BYTE $04									;LEFT SHIFT
+.BYTE $08									;CONTROL
+;.BYTE #$10									;REPEAT FOR FUTURE USE
+
+;UNMODIFIED ASCII TRANSLATION TABLE TO DETERMINE PROPER ACTION FOR KEY PRESSED WITHOUT SHIFT OR CAPS LOCK KEY
+ASCII_MASK:
+
+;ASCII CODE         KEY POSITION ON KEYBOARD    KEY DESCRIPTION/FUNCTION
+.BYTE $08       	;               00          SM (BACK SPACE)
+.BYTE $31       	;               01          1
+.BYTE $32        	;               02          2
+.BYTE $33        	;               03          3
+.BYTE $34        	;               04          4
+.BYTE $35        	;               05          5
+.BYTE $36        	;               06          6
+.BYTE $37       	;               07          7
+.BYTE $38        	;               08          8
+.BYTE $39        	;               09          9
+.BYTE $30        	;               0A          0
+.BYTE $2D       	;               0B          -
+.BYTE $5E        	;               0C          ^
+.BYTE $83        	;               0D          F4
+.BYTE $82        	;               0E          F3
+.BYTE $81        	;               0F          F2
+.BYTE $77        	;               10          w
+.BYTE $65        	;               11          e
+.BYTE $72        	;               12          r
+.BYTE $74        	;               13          t
+.BYTE $79        	;               14          y
+.BYTE $75        	;               15          u
+.BYTE $69        	;               16          i
+.BYTE $6F        	;               17          o
+.BYTE $70        	;               18          p
+.BYTE $40        	;               19          @
+.BYTE $5B       	;               1A          [
+.BYTE $09        	;               1B          TAB
+.BYTE $37        	;               1C          7(NL)
+.BYTE $00        	;               1D         	CAN'T OCCUR
+.BYTE $39        	;               1E          9(NL)
+.BYTE $38        	;               1F          8(NL)
+.BYTE $73        	;               20          s
+.BYTE $64        	;               21          d
+.BYTE $66        	;               22          f
+.BYTE $67        	;               23          g
+.BYTE $68        	;               24          h
+.BYTE $6A       	;               25          j
+.BYTE $6B       	;               26          k
+.BYTE $6C       	;               27          l
+.BYTE $3B       	;               28          ;
+.BYTE $3A       	;               29          :
+.BYTE $5D       	;               2A          ]
+.BYTE $0D       	;               2B          ENTER
+.BYTE $34        	;               2C          4(NL)
+.BYTE $00        	;               2D         	CAN'T OCCUR
+.BYTE $36        	;               2E          6(NL)
+.BYTE $35        	;               2F          5(NL)
+.BYTE $78        	;               30          x
+.BYTE $63        	;               31          c
+.BYTE $76        	;               32          v
+.BYTE $62        	;               33          b
+.BYTE $6E        	;               34          n
+.BYTE $6D       	;               35          m
+.BYTE $2C       	;               36          ,
+.BYTE $2E        	;               37          .
+.BYTE $2F        	;               38          /
+.BYTE $00        	;               39          R SHIFT
+.BYTE $1B       	;               3A          ESC (KWADRATY)
+.BYTE $31        	;               3B          1(NL)
+.BYTE $32        	;               3C          2(NL)
+.BYTE $00        	;               3D          CTRL (R)
+.BYTE $2D       	;               3E          -(NL)
+.BYTE $33        	;               3F          3(NL)
+.BYTE $A1       	;               40          LEFT
+.BYTE $20        	;               41          SPACE
+.BYTE $A2       	;               42          RIGHT
+.BYTE $A3       	;               43          DOWN
+.BYTE $00        	;               44         	CAN'T OCCUR
+.BYTE $A0       	;               45          UP
+.BYTE $00        	;               46         	CAN'T OCCUR
+.BYTE $A4       	;               47          HOME (1ST LINE)
+.BYTE $7F        	;               48          C W KWADRACIE (DELETE)
+.BYTE $30        	;               49          0(NL)
+.BYTE $2C       	;               4A          ,(NL)
+.BYTE $2B       	;               4B          +(NL)
+.BYTE $00        	;               4C         	CAN'T OCCUR
+.BYTE $00        	;               4D         	CAN'T OCCUR
+.BYTE $00        	;               4E         	CAN'T OCCUR
+.BYTE $00        	;               4F         	CAN'T OCCUR
+.BYTE $71        	;               50          q
+.BYTE $84        	;               51          F5
+.BYTE $85        	;               52          F6
+.BYTE $61        	;               53          a
+.BYTE $00        	;               54          CAPS LOCK
+.BYTE $7A       	;               55          z
+.BYTE $3C       	;               56          <
+.BYTE $00        	;               57          LEFT SHIFT
+.BYTE $0D       	;               58          ENTER (NL)
+.BYTE $00        	;               59         	CAN'T OCCUR
+.BYTE $00        	;               5A         	CAN'T OCCUR
+.BYTE $00        	;               5B         	CAN'T OCCUR
+.BYTE $00        	;               5C         	CAN'T OCCUR
+.BYTE $00        	;               5D         	CAN'T OCCUR
+.BYTE $00        	;               5E         	CAN'T OCCUR
+.BYTE $80        	;               5F          F1
+
+;MODIFIED ASCII CODES FOR KEYS WITH CAPS LOCK OR SHIFT PRESSED
+SHIFT_MASK:
+;ASCII CODE         KEY POSITION ON KEYBOARD    KEY DESCRIPTION/FUNCTION WITH SHIFT ACTIVE
+.BYTE $08       	;               00          SM (BACK SPACE)
+.BYTE $21       	;               01          !
+.BYTE $22        	;               02          "
+.BYTE $23        	;               03          #
+.BYTE $24        	;               04          $
+.BYTE $25        	;               05          %
+.BYTE $26        	;               06          &
+.BYTE $27       	;               07          '
+.BYTE $28        	;               08          (
+.BYTE $29        	;               09          )
+.BYTE $3D        	;               0A          =
+.BYTE $5F       	;               0B          _
+.BYTE $5E        	;               0C          ~
+.BYTE $83        	;               0D          F4
+.BYTE $82        	;               0E          F3
+.BYTE $81        	;               0F          F2
+.BYTE $57        	;               10          W
+.BYTE $45        	;               11          E
+.BYTE $52        	;               12          R
+.BYTE $54        	;               13          T
+.BYTE $59        	;               14          Y
+.BYTE $55        	;               15          U
+.BYTE $49        	;               16          I
+.BYTE $4F        	;               17          O
+.BYTE $50        	;               18          P
+.BYTE $60        	;               19          `
+.BYTE $7B       	;               1A          {
+.BYTE $09        	;               1B          TAB
+.BYTE $37        	;               1C          7(NL)
+.BYTE $00        	;               1D         	CAN'T OCCUR
+.BYTE $39        	;               1E          9(NL)
+.BYTE $38        	;               1F          8(NL)
+.BYTE $53        	;               20          S
+.BYTE $44        	;               21          D
+.BYTE $46        	;               22          F
+.BYTE $47        	;               23          G
+.BYTE $48        	;               24          H
+.BYTE $4A       	;               25          J
+.BYTE $4B       	;               26          K
+.BYTE $4C       	;               27          L
+.BYTE $2B       	;               28          +
+.BYTE $2A       	;               29          *
+.BYTE $7D       	;               2A          }
+.BYTE $0D       	;               2B          ENTER
+.BYTE $34        	;               2C          4(NL)
+.BYTE $00        	;               2D         	CAN'T OCCUR
+.BYTE $36        	;               2E          6(NL)
+.BYTE $35        	;               2F          5(NL)
+.BYTE $58        	;               30          X
+.BYTE $43        	;               31          C
+.BYTE $56        	;               32          V
+.BYTE $42        	;               33          B
+.BYTE $4E        	;               34          N
+.BYTE $4D       	;               35          M
+.BYTE $5C       	;               36          \
+.BYTE $7C        	;               37          |
+.BYTE $3F        	;               38          ?
+.BYTE $00        	;               39          R SHIFT
+.BYTE $1B       	;               3A          ESC (KWADRATY)
+.BYTE $31        	;               3B          1(NL)
+.BYTE $32        	;               3C          2(NL)
+.BYTE $00        	;               3D          CTRL (R)
+.BYTE $2F       	;               3E          /
+.BYTE $33        	;               3F          3(NL)
+.BYTE $A1       	;               40          LEFT
+.BYTE $20        	;               41          SPACE
+.BYTE $A2       	;               42          RIGHT
+.BYTE $A3       	;               43          DOWN
+.BYTE $00        	;               44         	CAN'T OCCUR
+.BYTE $A0       	;               45          UP
+.BYTE $00        	;               46         	CAN'T OCCUR
+.BYTE $A4       	;               47          HOME (1ST LINE)
+.BYTE $7F        	;               48          C W KWADRACIE (DELETE)
+.BYTE $30        	;               49          0(NL)
+.BYTE $2C       	;               4A          ,(NL)
+.BYTE $2A       	;               4B          *
+.BYTE $00        	;               4C         	CAN'T OCCUR
+.BYTE $00        	;               4D         	CAN'T OCCUR
+.BYTE $00        	;               4E         	CAN'T OCCUR
+.BYTE $00        	;               4F         	CAN'T OCCUR
+.BYTE $51        	;               50          Q
+.BYTE $84        	;               51          F5
+.BYTE $85        	;               52          F6
+.BYTE $41        	;               53          A
+.BYTE $00        	;               54          CAPS LOCK
+.BYTE $5A       	;               55          Z
+.BYTE $3E       	;               56          >
+.BYTE $00        	;               57          LEFT SHIFT
+.BYTE $0D       	;               58          ENTER (NL)
+.BYTE $00        	;               59         	CAN'T OCCUR
+.BYTE $00        	;               5A         	CAN'T OCCUR
+.BYTE $00        	;               5B         	CAN'T OCCUR
+.BYTE $00        	;               5C         	CAN'T OCCUR
+.BYTE $00        	;               5D         	CAN'T OCCUR
+.BYTE $00        	;               5E         	CAN'T OCCUR
+.BYTE $80        	;               5F          F1
+
+; OUTCH - Display a printable character or interpret a control character
+;
+; ARGUMENTS: Character to be displayed or interpreted in A
+;
+; ARGUMENTS RETURNED: None, A, X, and Y registers preserved
+;
+.proc _OUTCH
+            cld
+            sta     ASVGR           ; Preserve registers
+            stx     XSVGR           ;
+            sty     YSVGR           ;
+            cmp     #$00            ; 
+            bpl     NORMAL          ; Normal character, skip
+            bit     EXTHI           ; If EXTHI set, use external user routine to process
+                                    ; especial characters     
+            bpl     SPECIAL         ; Not set, use internal routine
+            jmp     (QEXHI7)        ; Jump to external processor
+
+NORMAL:     sec                     ; Clear borrow for substraction
+            sbc     #$20            ; Rebase character number
+            bcs     LCC04           ; Valid character, continue
+            jmp     CONTROL         ; Go to control character processing
+
+LCC04:      pha
+            asl     CRSRWRAP
+            jsr     LNCOLCRD        ; Get coord. in video RAM of current COL and LINE
+            pla
+            cmp     #$5F
+            bne     LCC23
+            bit     SHODEL
+            bmi     LCC32
+            jsr     CURSORL         ; Move cursor left
+            jsr     LNCOLCRD
+            lda     #$00
+            jsr     PRNCHR
+            jmp     RETURN
+
+LCC23:      cmp     #$3F
+            bne     LCC32
+            bit     SHOUL
+            bmi     LCC32
+            jsr     LD0D7
+            jmp     LCC45
+
+LCC32:      jsr     PRNCHR
+            bit     UNDRLN
+            bpl     LCC3D
+            jsr     LD0D7
+LCC3D:      bit     RVIDEO
+            bpl     LCC45
+            jsr     LD0A7
+LCC45:      jsr     CURSORR
+
+RETURN:     ldy     YSVGR           ; Restore registers and return
+            ldx     XSVGR           ;
+            lda     ASVGR           ;
+            rts
+
+SPECIAL:    ldx     #$08
+LCC54:      cmp     LCCFF,x
+            beq     LCC7A
+            dex
+            bpl     LCC54
+            cmp     #$A0
+            bne     LCC66
+            jsr     LINEUP
+            jmp     RETURN
+
+LCC66:      cmp     #$A2
+            bne     LCC70
+            jsr     CURSORR
+            jmp     RETURN
+
+LCC70:      cmp     #$A4
+            bne     RETURN
+            jsr     _HOMETW
+            jmp     RETURN
+
+LCC7A:      lda     LCD08,x
+            jmp     NORMAL
+
+CONTROL:    clc                     ; Clear carry for addition
+            adc     #$20            ; Restore character number
+            bit     EXCCP           ; Check if external processor for special chars
+            bpl     CHKCR           ; No, skip
+            jmp     (QEXCC)         ; Yes, jump to external processor
+
+CHKCR:      cmp     #$0D            ; Is it CR?
+            bne     CHKLF           ; No, go check line feed
+            asl     CRSRWRAP        ; Yes, check and clear cursor wrap flag
+            bcs     RETURN          ; If there was a cursor wrap, return
+            jsr     _CRLF           ; Output CRLF
+            jmp     RETURN          ;   and return
+
+CHKLF:      cmp     #$0A            ; Is it LF?
+            bne     CHKBS           ; No, go check back space
+            jsr     _LINEFD         ; Yes, output line feed
+            jmp     RETURN          ;   and return
+
+CHKBS:      cmp     BSPACE          ; Is it back space?
+            bne     CHKCN           ; No, go check cancel
+            jsr     CURSORL         ; Move cursor left
+            jmp     RETURN          ;   and return
+
+CHKCN:      cmp     CANCEL          ; Is it CTRL-X?
+            bne     CHKFF           ; No, go check form feed
+            lda     LINE            ; 
+            jsr     _CLRTLN         ; Clear line LINE
+            lda     #$01            ;
+            sta     COL             ; Set column 1
+            jmp     RETURN          ;   and return
+
+CHKFF:      cmp     FFEED           ; Is it form feed?
+            bne     CHKBL           ; No, go check bell
+            jsr     _CLRHTW         ; Yes, clear text window and home the cursor
+            jmp     RETURN          ;   and return
+
+CHKBL:      cmp     BELL            ; Bell?
+            bne     CHKTB           ; No, go checl tab stop
+            jsr     RNGBEL          ; Go ring the bell
+            jmp     RETURN          ;   and return
+
+CHKTB:      cmp     TAB             ; Tab?
+            beq     TABSTP          ; Yes, go process it
+JMPRET:     jmp     RETURN          ;   and return
+
+TABSTP:     ldx     #$00            ; Init index to tabstop table
+GETTS:      lda     TABTBL,x        ; Get tabstop
+            beq     JMPRET2         ; If no more, we're done
+            cmp     COL             ; How is tabstop relative to current column?
+            beq     NXTTS           ; Same, get next tabstop
+            bcc     NXTTS           ; Less, get next tabstop
+            cmp     #TXTHRES+1      ; Past last column?
+            bcs     JMPRET2         ; Yes, we're done
+            sta     COL             ; No, set column
+            bcc     JMPRET          ; Always jump
+            ; Not reached
+
+NXTTS:      inx                     ; Next tabstop
+            cpx     #$20            ; Repeat until
+            bne     GETTS           ;   last entry
+JMPRET2:    jmp     RETURN          ;   and return
+.endproc
+
+LCCFF:      .byte   $00
+            .byte   $8A
+            .byte   $8B
+            .byte   $8C
+            .byte   $8D
+            .byte   $8E
+            .byte   $A1
+            .byte   $A3
+            .byte   $B4
+
+LCD08:      .byte   $00
+            .byte   $2A
+            .byte   $2F
+            .byte   $2D
+            .byte   $2B
+            .byte   $0D
+            .byte   $08
+            .byte   $0A
+            .byte   $0C
+
+; INITIO - Clear screen and set default values of display parameters
+;
+_INITIO:    jsr     _INITTW         ; Init text window
+            lda     #<__INPLBUF     ; Inits input line buffer
+            sta     QLN             ;
+            lda     #>__INPLBUF     ;
+            sta     QLN+1           ;
+            ldx     #$40            ; Clears last 64 bytes of input buffer to make
+            lda     #' '            ; room for the 8 key legends
+INITIO1:    sta     __INPLBUF+__INPBSIZ-1,x
+            dex                     ;
+            bne     INITIO1         ; Loop until done
+            lda     #$80            ; Mark KEYSTR table as empty
+INITIO2:    sta     KEYSTR,x        ;
+            dex                     ;
+            bne     INITIO2         ; Repeat until done
+            lda     #$00            ; Clear last key pressed
+            sta     LSTKEY          ;
+            jmp     _DRWLEG         ; Go to draw legends and return
+
+; INITTW - INITIALIZE THE TEXT WINDOW TO 24 LINES and CLEAR THE TEXT WINDOW ONLY
+;
+_INITTW:    cld
+            jsr     _CLRDSP         ; Clear the entire VIDHRES by VIDVRES screen
+            lda     #$00            ; Enable keyboard echo
+            sta     NOLEKO          ;
+            ldx     #<(CRSRWRAP-KBECHO+1)
+INITTW1:    sta     KBECHO,x        ; Clear flags (from KBECHO to CRSRWRAP)
+            dex                     ;
+            bpl     INITTW1         ;
+            lda     #$01            ; Make a short beep
+            tax                     ;
+            tay                     ;
+            jsr     _BEEP           ;
+            jsr     SETBCKTA        ; Set backtrack buffer address
+            ldy     #$00            ; Init index
+            jsr     SWTBANK1        ; Turns on I-O address space and switches to bank 1
+            lda     #$FF            ; Mark backtrack buffer as empty line
+            sta     (VRAMDST),y     ;
+            iny                     ;
+            lda     #$0D            ;
+            sta     (VRAMDST),y     ;
+            sty     BKTBIDX         ; Set backtrack buffer current index
+            jsr     RSTBANK0        ; Restores Bank 0 and turns on RAM at BE00-BFFF
+            lda     #$12
+            ldy     #$00
+            ; Fall through
+
+; DEFTW - SET THE POSITION AND SIZE OF THE TEXT WINDOW
+;
+; Arguments: A=Number of text lines
+;            Y=Y coordinate of the top line
+;
+_DEFTW:     sta     NLINET          ; Set number of text lines
+            sty     YTDOWN          ; Set position of text window
+            ; Fall through
+
+; CLRHTW - CLEAR THE TEXT WINDOW and HOME THE CURSOR.
+;
+_CLRHTW:    jsr     _CLRTW          ; Clear the text window without moving the cursor
+            ; Fall through
+
+; HOMETW - PLACE THE CURSOR IN THE HOME POSITION (COL=1, LINE=1)
+;
+.proc _HOMETW
+            pha                     ; Preserve A
+            lda     #$01            ; Set LINE and COL
+            sta     LINE            ;
+            sta     COL             ;
+            pla                     ; Restore A
+            rts
+.endproc
+
+; CRLF - MOVE CURSOR TO THE LEFT SCREEN EDGE AND DOWN ONE LINE
+;
+.proc _CRLF
+            pha                     ; Preserve A
+            lda     #$01            ; Set column 1
+            sta     COL             ;
+            bit     NOLFCR          ; Check if automatic line feed
+            bmi     RETURN          ; No, return
+            txa                     ; Preserve X
+            pha                     ;
+            tya                     ; Preserve Y
+            pha                     ;
+            jsr     _LINEFD         ; Line feed
+            pla                     ; Restore Y
+            tay                     ;
+            pla                     ; Restore X
+            tax                     ;
+RETURN:     pla                     ; Restore A and return
+            rts                     ;
+.endproc
+
+; CLRDSP - Clear the entire VIDHRES by VIDVRES display
+;
+.proc _CLRDSP
+            pha                     ; Preserve A and X
+            txa                     ;
+            pha                     ;
+            lda     #<VIDEORAM      ; Set origin in video RAM start
+            sta     VRAMORG         ;
+            lda     #>VIDEORAM      ;
+            sta     VRAMORG+1       ;
+            lda     #<VIDEOLEN      ; Set count to video RAM length
+            sta     VRAMCNT         ;
+            lda     #>VIDEOLEN      ;
+            sta     VRAMCNT+1       ;
+            jsr     CLRVRAM         ; And cleat display area
+            pla                     ; Restore X and A
+            tax                     ;
+            pla                     ;
+            rts
+.endproc
+
+; CLRTW - CLEAR THE TEXT WINDOW WITHOUT MOVING THE CURSOR
+;
+.proc _CLRTW
+            pha                     ; Preserve A and X
+            txa                     ;
+            pha                     ;
+            lda     YTDOWN          ; Get coordinate of top of text window
+            jsr     TLINSTART       ; Calculate where it starts at video memory
+            jsr     VDST2ORG        ; Move it into VRAMORG
+            lda     NLINET          ; Get number of text lines in the text window
+            ldx     #TXTHRES        ; Last character of line
+            jsr     CHRCOORD        ; Calculate video ram coords. of last char
+            lda     VRAMDST         ; Calculate number of bytes from orig to dest
+            sec                     ;
+            sbc     VRAMORG         ;
+            sta     VRAMCNT         ;
+            lda     VRAMDST+1       ;
+            sbc     VRAMORG+1       ;
+            sta     VRAMCNT+1       ;
+            inc     VRAMCNT         ;
+            bne     SKIP            ;
+            inc     VRAMCNT+1       ;
+SKIP:       jsr     CLRVRAM         ; Clear VRAMCNT bytes from VRAMORG
+            pla                     ; Restore registers
+            tax                     ;
+            pla                     ;
+            rts
+.endproc
+
+; CLRLEG - CLEAR THE LEGEND DISPLAY AREA (BOTTOMMOST 16 SCAN LINES)
+;
+; Monomeg display is VIDHRESxVIDVRES bits
+;
+; Last 16 lines start at VIDHRES*(VIDVRES-16)/8 = VIDEORAM+$3840
+; and occupy 16*VIDHRES/8 = $3C0 bytes
+;
+_CLRLEG:    lda     #$20 ;<(VIDEORAM+VIDHRES*(VIDVRES-16)/8)
+            sta     VRAMORG
+            lda     #$9C ;>(VIDEORAM+VIDHRES*(VIDVRES-16)/8)
+            sta     VRAMORG+1
+            lda     #$20 ;<(16*VIDHRES/8)
+            sta     VRAMCNT
+            lda     #$03 ;>(16*VIDHRES/8)
+            sta     VRAMCNT+1
+            jmp     CLRVRAM         ; Jump to clear the video ram and return
+
+; Internal procedure: Clear the last text line
+;
+.proc CLRLSTLN
+            lda     NLINET
+            ; Fall through
+.endproc
+
+; CLRTLN - CLEAR A SPECIFIED TEXT LINE
+;
+; Arguments: A : Line number
+;
+.proc _CLRTLN
+            ldx     #TXTHRES        ; Number of chars per line
+            cmp     NLINET          ; Is line number past number of lines in text win?
+            bcc     SKIP            ; No, skip
+            lda     NLINET          ; Yes, set line as last line
+SKIP:       jsr     CHRCOORD        ; Get video ram coords. of last char in text line
+
+            ; Calculate orig of video ram to clear. Each line is 60 bytes (80 6-pixel
+            ; wide characters ), text line height is 10 pixels, so 60*10 = 600 ($258)
+            ;
+            lda     VRAMDST         ; Calculate video ram origin (dest - 600 bytes)
+            sec                     ;
+            sbc     #$8F            ;
+            sta     VRAMORG         ;
+            lda     VRAMDST+1       ;
+            sbc     #$01            ;
+            sta     VRAMORG+1       ;
+            lda     #$90            ; Set byte count
+            sta     VRAMCNT         ;
+            lda     #$01            ;
+            sta     VRAMCNT+1       ;
+            ; Fall through to clear RAM
+.endproc
+
+; Internal procedure: Clears VRAMCNT bytes of video RAM starting at VRAMORG
+;
+.proc CLRVRAM
+            jsr     SWTBANK1        ; Turns on I-O address space and switches to bank 1
+            jsr     _CLRVRAM        ; Do the actual clearing
+            jmp     RSTBANK0        ; Restores Bank 0 and turns on RAM at BE00-BFFF
+
+_CLRVRAM:   tya                     ; Saves Y register
+            pha                     ;
+            lda     #$00            ; Set for clear
+            ldy     VRAMCNT+1       ; Get count MSB
+            beq     CLRVREM         ; Count is less than a page, go copy remainder
+            tay                     ; Init index
+CLRVRPAG:   sta     (VRAMORG),y     ; Clears two bytes per iteration for speed
+            iny                     ;
+            sta     (VRAMORG),y     ;
+            iny                     ;
+            bne     CLRVRPAG        ; While not end of page, continue
+            inc     VRAMORG+1       ; Increment page origin
+            dec     VRAMCNT+1       ; Decrement page count
+            bne     CLRVRPAG        ; Repeat until last page
+CLRVREM:    ldy     VRAMCNT         ; Get remainder bytes
+            beq     CLRVDONE        ; None, we're finished
+CLRVREML:   dey
+            sta     (VRAMORG),y
+            bne     CLRVREML        ; Loop until done
+CLRVDONE:   pla                     ; Restore Y and return
+            tay                     ;
+            rts
+.endproc
+
+_LINEFD:    lda     LINE
+            cmp     NLINET
+            bcc     LCE56
+            bit     NOSCRL
+            bpl     LCE5A
+            jsr     _CLRTW
+            lda     #$00
+            sta     LINE
+LCE56:      inc     LINE
+            rts
+
+LCE5A:      lda     NLINET
+            cmp     #$02
+            bcc     LCE9A
+            ldx     #$35
+            jsr     CHRCOORD        ; Calculate video ram coords. of char in text line
+            lda     VRAMDST
+            sta     VRAMCNT
+            lda     VRAMDST+1
+            sta     VRAMCNT+1
+            lda     YTDOWN
+            jsr     TLINSTART
+            jsr     VDST2ORG
+            lda     VRAMORG
+            clc
+            adc     #$90
+            sta     VRAMDST
+            lda     VRAMORG+1
+            adc     #$01
+            sta     VRAMDST+1
+            lda     VRAMCNT
+            sec
+            sbc     VRAMDST
+            sta     VRAMCNT
+            lda     VRAMCNT+1
+            sbc     VRAMDST+1
+            sta     VRAMCNT+1
+            inc     VRAMCNT
+            bne     LCE97
+            inc     VRAMCNT+1
+LCE97:      jsr     LCE9D
+LCE9A:      jmp     CLRLSTLN
+
+LCE9D:      jsr     SWTBANK1        ; Turns on I-O address space and switches to bank 1
+            jsr     LCEA6
+            jmp     RSTBANK0        ; Restores Bank 0 and turns on RAM at BE00-BFFF
+
+LCEA6:      tya
+            pha
+            ldy     #$00
+            ldx     VRAMCNT+1
+            beq     LCECB
+LCEAE:      lda     (VRAMDST),y
+            sta     (VRAMORG),y
+            iny
+            lda     (VRAMDST),y
+            sta     (VRAMORG),y
+            iny
+            lda     (VRAMDST),y
+            sta     (VRAMORG),y
+            iny
+            lda     (VRAMDST),y
+            sta     (VRAMORG),y
+            iny
+            bne     LCEAE
+            inc     VRAMDST+1
+            inc     VRAMORG+1
+            dex
+            bne     LCEAE
+LCECB:      ldx     VRAMCNT
+            beq     LCED7
+LCECF:      lda     (VRAMDST),y
+            sta     (VRAMORG),y
+            iny
+            dex
+            bne     LCECF
+LCED7:      pla
+            tay
+            rts
+
+; Internal procedure: Advance cursor position to the right and manage wrap
+;
+.proc CURSORR
+            pha                     ; Save accumulator
+            lda     COL             ; Get column
+            cmp     #TXTHRES        ; Have we reached pos 80?
+            bcs     WRAP            ; Yes, wrap
+            inc     COL             ; No, increment position
+            pla                     ; Recover accumulator and return
+            rts
+
+WRAP:       jsr     _CRLF           ; Cursor wrap (first col and down one line)
+            sec                     ; Set the curor wrap flag
+            ror     CRSRWRAP        ;
+            pla                     ; Recover accumulator and return
+            rts
+.endproc
+
+; Internal procedure: Move cursor left
+;
+.proc CURSORL
+            dec     COL             ; Decrement column number
+            bne     RETURN          ; If 1 or greater, we're done
+            pha                     ; Nope, preserve A
+            lda     #TXTHRES        ; New col is the last one
+            sta     COL             ;
+            dec     LINE            ; Up one line
+            bne     DONE            ; If 1 or more, we're done
+            lda     NLINET          ; If 0, wrap to the bottom line
+            sta     LINE            ;
+DONE:       pla                     ; Restore A and return
+RETURN:     rts
+.endproc
+
+; Internal procedure: Decrement text Y coordinate and wrap to bottom if at first line
+;
+.proc LINEUP
+            dec     LINE            ; Up one line
+            beq     WRAP            ; If past first line, jump
+            rts                     ; No, we're done
+
+WRAP:       pha                     ; Preserve A
+            lda     NLINET          ; Wrap cursor to end of text screen
+            sta     LINE            ;
+            pla                     ; Recover A and return
+            rts                     ;
+.endproc
+
+
+; Internal procedure: Get coordinates in video RAM of current COL and LINE
+; of text window
+;
+; Returns coordinates in VRAMDST, char displacement in BITDISPL
+;
+.proc LNCOLCRDST
+            ldx     COL             ; Current COL in text window
+            beq     SETCOL1         ; 0? Can't be, set to 1
+            cpx     #TXTHRES+1      ; Past last column?
+            bcc     LCF25           ; No, continue
+SETCOL1:    ldx     #$01            ; Yes, wrap to COL 1
+            stx     COL             ;
+LCF25:      lda     LINE            ; Get current line
+            beq     LCF31           ; 0? Can't be, set to 1
+            cmp     NLINET          ; Are we past the last line?
+            bcc     CHRCOORD        ;   No (less)
+            beq     CHRCOORD        ;   No (equal)
+LCF31:      lda     #$01            ; Yes, wrap to LINE 1
+            sta     LINE            ;
+            ; Fall through
+.endproc
+
+
+; Internal procedure: Calculate video ram coordinates of character in text line
+;
+; Arguments: A = Text line number
+;            X = Character number
+; Returned:  Coordinates in VRAMDST, char displacement in BITDISPL
+;
+
+.proc CHRCOORD
+            ; Calculate coordinates in video ram of text line
+ 
+            sta     IOTEMP1         ; Multiply by 10 (text line height)
+            asl     a               ;
+            asl     a               ;
+            adc     IOTEMP1         ;
+            asl     a               ;
+            adc     YTDOWN          ; Add to Y coordinate of text window
+            sec                     ;
+            sbc     #$01            ; minus 1
+            jsr     TLINSTART       ; Calculates start address of raster line
+
+            dex                     ; Claculate horizonal len in pixels
+            txa                     ; Char number minus 1 (base 0)
+            inx                     ;
+            sta     IOTEMP1         ;
+            asl     a               ; Multiply by 3
+            adc     IOTEMP1         ;
+            pha                     ; And save
+            asl     a               ; Total = x6 (character len)
+            and     #$07            ; Module 8 to calculate displacement
+            sta     BITDISPL        ; Set char displacement in bits from VRAMORG
+            pla                     ; Recover char number x 3
+            lsr     a
+            lsr     a
+            clc
+            adc     VRAMDST
+            sta     VRAMDST
+            bcc     LCF60
+            inc     VRAMDST+1
+LCF60:      rts
+.endproc
+
+; Internal procedure - Invert raster line number, then calculates start address
+;
+; Used by the GRAPHICS driver, as has the Y coordinates inverted
+;
+            .export NTLINSTART
+
+NTLINSTART: eor     #$FF
+            ; Fall through
+
+; Internal procedure: Calculates raster line start address
+; Video res is 480x256 bits, or 60x256 bytes
+; This routine multiplies the line number x 60 and then adds the base address to
+; the result and stores it in VRAMDST
+;
+; A = Y coordinate of the start of the raster line
+;
+; Returns strat address into VRAMDST
+;
+.proc TLINSTART
+   	PHA											;PRESERVE A TO STACK (FOR EXAMPLE #$EF IN A - 239)
+	LDA #$00									;LOAD #$00
+   	STA $FB										;STORE AT $FB - RESET $FB TO #$00 											(#$00)		(#$00)
+   	PLA											;RESTORE A FROM STACK														(#$EF)		(#$B3)
+   	ASL A				                      	;MULTIPLY BY 2																(#$1DE)		(#$166)
+  	ROL $FB				                     	;EXTRACT CARRY BYTE 														(#$01)		(#$01)
+  	ASL A				                      	;MULTIPLY BY 2																(#$1BC)		(#$CC)
+  	ROL $FB				                     	;EXTRACT CARRY BYTE															(#$03)		(#$02)
+	ASL A				                     	;TEMP VALUE TO COMPUTE SCREEN CURSOR POSITION								(#$BC)		(#$CC)
+    ROL $FB										;SECOND TEMPORARY VALUE														(#$03)		(#$02)
+    STA $FA				                     	;PAGE IN VISABLE MEMORY OF CURSOR POSITION									(#$03)		(#$02)
+	PHA			                     			;SAVE TEMP VALUE OF VISABLE MEMORY PAGE 									(#$BC)		(#$CC)
+    LDA $FB				                       	;MULTIPLY BY 2																(#$178)		(#$198)
+    STA $F3				                     	;EXTRACT CARRY BYTE															(#$07)		(#$5)
+    ASL $FA				                      	;MULTIPLY BY 2																(#$F0)		(#$130)
+    ROL $FB		                    			;EXTRACT CARRY BYTE															(#$0E)		(#$0B)
+    ASL $FA				                       	;MULTIPLY BY 2																(#$1E0)		(#$60)
+    ROL $FB				                     	;EXTRACT CARRY BYTE															(#$1D)		(#$16)
+ 	CLC					                      	;MULTIPLY BY 2																(#$1C0)		(#$C0)
+	PLA		                     				;EXTRACT CARRY BYTE															(#$3B)		(#$2C)
+    ADC $FA										;SET CARRY FLAG FOR SUBTRACTION												
+    STA $F2				                     	;MINUS VALUE STORED IN $FA	(#$1C0-#$BC)									(#$104)		(#$0F4)		(#$1C0-#$CC)
+    LDA $F3				               		    ;UPDATED LOW BYTE OF MEMORY CURSOR POSITION									(#$04)		(#$F4)
+    ADC $FB				                    	;LOAD VISABLE PAGE BYTE														(#$3B)		(#$2C)
+ 	CLC					                    	;MINUS VALUE IN $FB							(#$3B-#$03 - 0 AS CARRY WAS SET EALIER)		(#$38)(2C-2 and -1 FOR CARRY FLAG NOT SET)
+    ADC #$80				                   	;CLEAR CARRY BIT
+    STA $F3										;START OF END MEMORY PAGE													(#$38+#$C0)	(29+C0=E9)
+   	NOP					                  	    ;UPDATED PAGE OF CURSOR POSITION ON SCREEN`									(#$F8)		(#$E9)     
+   	RTS											;END OF SUBROUTINE
+
+  ;          pha                     ; Preserve Y Coordinate
+  ;          lda     #$00            ; Init result variable
+  ;          sta     IOTEMP2         ;
+  ;          pla                     ; Recover Y coordinate
+  ;          asl     a               ; Multiply by 4, result goes into IOTEMP2:IOTEMP1
+  ;          rol     IOTEMP2         ;
+  ;          asl     a               ;
+  ;          rol     IOTEMP2         ;
+  ;          sta     IOTEMP1         ;
+  ;          lda     IOTEMP2         ; Now, multiply by 16 (64 in total)
+  ;          sta     VRAMDST+1       ; and store result in VRAMDST
+  ;          lda     IOTEMP1         ;
+  ;          asl     a               ;
+  ;          rol     VRAMDST+1       ;
+  ;          asl     a               ;
+  ;          rol     VRAMDST+1       ;
+  ;          asl     a               ;
+  ;          rol     VRAMDST+1       ;
+  ;          asl     a               ;
+  ;          rol     VRAMDST+1       ;
+  ;          sec                     ; Substract the stored x4 nultiplication
+  ;          sbc     IOTEMP1         ;
+  ;          sta     VRAMDST         ;
+  ;          lda     VRAMDST+1       ;
+  ;          sbc     IOTEMP2         ;
+  ;          clc                     ;
+  ;          adc     #>VIDEORAM      ; And adds video ram origin
+  ;          sta     VRAMDST+1       ;
+  ;          rts
+.endproc
+
+.proc LCF92
+            jsr     LCFFD
+            jsr     _TIOON          ; Turn on I-O address space
+            lda     BNKCTL          ; Switch to font bank
+            eor     FNBNK           ;
+            sta     BNKCTL          ;
+            ldy     #$06            ; Chars are seven pixels high
+            ldx     #$00
+LCFA5:      stx     IOTEMP1
+            lda     (CHARFNTP),y    ; Get byte for char's pixel line (from bottom to top)
+            and     #$F8            ; Mask-out three lower bits
+            ldx     BITDISPL        ; Get char displacement in bits from VRAMORG
+            beq     SKIP            ; If no displacement, skip
+LCFAF:      lsr     a
+            ror     IOTEMP1
+            dex
+            bne     LCFAF
+SKIP:       sta     L02B4,y
+            lda     IOTEMP1
+            sta     L02BE,y
+            dey
+            bpl     LCFA5
+            iny
+            lda     (CHARFNTP),y
+            ror     a
+            bcc     LCFF2
+            ldx     #$06
+LCFC8:      lda     L02B4,x
+            sta     L02B6,x
+            lda     L02BE,x
+            sta     L02C0,x
+            dex
+            bpl     LCFC8
+            lda     #$00
+            ldx     #$02
+            jsr     LD001
+            lda     (CHARFNTP),y
+            ror     a
+            ror     a
+            bcc     LCFF2
+            lda     #$20
+            ldx     BITDISPL
+LCFE8:      lsr     a
+            ror     L02BE
+            dex
+            bpl     LCFE8
+            sta     L02B4
+LCFF2:      lda     BNKCTL
+            ora     #$03
+            sta     BNKCTL
+            jmp     _IORES
+.endproc
+
+.proc LCFFD
+            lda     #$00
+            ldx     #$09
+            ; Fall through
+.endproc
+
+.proc LD001
+LOOP:       sta     L02B3,x
+            sta     L02BD,x
+            dex
+            bpl     LOOP
+            rts
+.endproc
+
+;
+; Internal procedure: Print character to screen at address VRAMORG
+; using the internal or external font, depending on the value of EXFONT
+;
+; A contains character index to char table (ascii code - $20)
+; VRAMORG is start location in video memory
+; BITDISPL contains the char displacement in bits from VRAMORG
+;
+; On exit,
+;
+            .export PRNCHR
+
+.proc PRNCHR
+            sta     IOTEMP1         ; Save character index
+            ldx     #$00            ; Init IOTEMP2
+            stx     IOTEMP2         ;
+
+            ; Multiply character index by 7, result into IOTEMP2:A
+            ; First, multiply by 8. Then, if result is not 0, substract
+            ; character index to obtain the result.
+
+            asl     a               ; Bigger char pos id 5F, so first shift never
+                                    ; Generates carry
+            asl     a               ; Second shift, insert carry into IOTEMP2
+            rol     IOTEMP2         ;
+            asl     a               ; Third shift, insert carry into IOTEMP2
+            rol     IOTEMP2         ;
+            sec                     ; Clear borrow
+            sbc     IOTEMP1         ; Substract char pos from accumulator to obtain x7
+            bcs     SKIP            ; No borrow skip
+            dec     IOTEMP2         ; Borrow, decrement MSB
+SKIP:       clc                     ; Clear carry for next addition
+            bit     EXFONT          ; Use external font table?
+            bpl     INTERNAL        ; No, go set internal
+            adc     QEXFNT          ; Add char index to external table addr
+            sta     CHARFNTP        ; and set the address of char in font table
+            lda     QEXFNT+1        ;
+            adc     IOTEMP2         ;
+            sta     CHARFNTP+1      ;
+            lda     EXFTBK          ; Get bank of external font table
+            jmp     PRINT           ; And continue to print character
+
+INTERNAL:   adc     #<__CHARTBL     ; Set pointer to character into internal char table
+            sta     CHARFNTP        ;
+            lda     #>__CHARTBL     ;
+            adc     IOTEMP2         ;
+            sta     CHARFNTP+1      ;
+            lda     #$00            ; Bank of internal character table
+
+PRINT:      sta     FNBNK           ; Set bank of current character table
+            jsr     LCF92
+            jsr     SWTBANK1        ; Turns on I-O address space and switches to bank 1
+            ldx     BITDISPL        ; Get window mask for the char displacement
+            lda     WMASKTHI,x      ;
+            sta     TMPMASK+1       ; And store it
+            lda     WMASKTLO,x      ;
+            sta     TMPMASK         ;
+            ldx     #$09
+LD05C:      ldy     #$01
+            lda     TMPMASK+1
+            and     (VRAMORG),y
+            ora     L02BD,x
+            sta     (VRAMORG),y
+            dey
+            lda     TMPMASK
+            and     (VRAMORG),y
+            ora     L02B3,x
+            sta     (VRAMORG),y
+            jsr     RSTRLNUP
+            dex
+            bpl     LD05C
+            jmp     RSTBANK0        ; Restores Bank 0 and turns on RAM at BE00-BFFF
+.endproc
+
+; TABLE OF MASKS FOR OPENING UP A 5 BIT WINDOW ANYWHERE IN GRAPHIC MEMORY
+;
+WMASKTLO:   .byte   $03
+            .byte   $81
+            .byte   $C0
+            .byte   $E0
+            .byte   $F0
+            .byte   $F8
+            .byte   $FC
+            .byte   $FE
+;HIGH BYTE
+WMASKTHI:   .byte   $FF
+            .byte   $FF
+            .byte   $FF
+            .byte   $7F
+            .byte   $3F
+            .byte   $1F
+            .byte   $0F
+            .byte   $07
+
+_OFFTCR:    asl     CURVIS
+            bcs     _FLPTCR
+            rts
+
+_ONTCR:     sec
+            ror     CURVIS
+            ; Fall through
+
+_FLPTCR:    pha
+            txa
+            pha
+            tya
+            pha
+            jsr     LNCOLCRD        ; Get coord. in video RAM of current COL and LINE
+            jsr     LD0A7
+            pla
+            tay
+            pla
+            tax
+            pla
+            rts
+
+LD0A7:      jsr     VDST2ORG
+            jsr     SWTBANK1        ; Turns on I-O address space and switches to bank 1
+            ldx     BITDISPL
+            lda     LD0FE,x
+            sta     TMPMASK+1
+            lda     LD0F6,x
+            sta     TMPMASK
+            ldx     #$09
+LD0BD:      ldy     #$01
+            lda     TMPMASK+1
+            eor     (VRAMORG),y
+            sta     (VRAMORG),y
+            dey
+            lda     TMPMASK
+            eor     (VRAMORG),y
+            sta     (VRAMORG),y
+            jsr     RSTRLNUP
+            dex
+            bpl     LD0BD
+            jmp     RSTBANK0        ; Restores Bank 0 and turns on RAM at BE00-BFFF
+
+LD0D7:      jsr     VDST2ORG
+            jsr     RSTRLNUP
+            jsr     SWTBANK1        ; Turns on I-O address space and switches to bank 1
+            ldx     BITDISPL
+            lda     LD0FE,x
+            ldy     #$01
+            eor     (VRAMORG),y
+            sta     (VRAMORG),y
+            dey
+            lda     LD0F6,x
+            eor     (VRAMORG),y
+            sta     (VRAMORG),y
+            jmp     RSTBANK0        ; Restores Bank 0 and turns on RAM at BE00-BFFF
+
+; EQUATES FOR CURSOR CELL POSITIONS
+;
+LD0F6:      .byte   $FC
+            .byte   $7E
+            .byte   $3F
+            .byte   $1F
+            .byte   $0F
+            .byte   $07
+            .byte   $03
+            .byte   $01
+LD0FE:      .byte   $00
+            .byte   $00
+            .byte   $00
+            .byte   $80
+            .byte   $C0
+            .byte   $E0
+            .byte   $F0
+            .byte   $F8
+
+; Turns on I-O address space and switches to bank 1
+;
+            .export SWTBANK1
+
+.proc SWTBANK1
+            jsr     _TIOON          ; Turn on I-O address space
+            lda     BNKCTL          ; Switch to bank 1
+            ora     #$03            ;
+            eor     #$00            ;
+            sta     BNKCTL          ;
+            lda     SVIA1DIR        ; Set port direction
+            ora     #$03            ;
+            sta     SVIA1DIR        ;
+            rts
+.endproc
+
+; Turn on I-O address space
+;
+            .export _TIOON
+
+.proc _TIOON
+            php                     ; Save IRQ enable flag
+            sec                     ; Set carry for enabling SEEIO flag
+            sei                     ; Disable interrupts
+            ror     SEEIO           ; Set I-O enable flag
+            sta     IOENABLE        ; Enable I/O space from $BE00 to $BFFF
+            plp                     ; Restore IRQ enable flag
+            rts
+.endproc
+
+; Switches back to Bank 0 and turns on RAM at BE00-BFFF
+;
+            .export RSTBANK0
+
+.proc RSTBANK0
+            lda     BNKCTL          ; Switch to bank 0
+            ora     #$03            ;
+            sta     BNKCTL          ;
+            ; Fall through
+.endproc
+
+; Turn RAM on at BEOO-BFFF
+;
+            .export _IORES
+
+.proc _IORES
+            php                     ; Save IRQ enable flag
+            sei                     ; Disable interrupts
+            asl     SEEIO           ; Test I-O enable flag
+            bmi     RETURN          ; Don't enable if flag still set
+            sta     IODISABLE       ; Disable IO
+RETURN:     plp                     ; Restore IRQ enable flag
+            rts
+.endproc
+
+; Internal procedure: Get coordinates in video RAM of current COL and LINE
+; of text window
+;
+; Returns coordinates in VRAMORG, char displacement in BITDISPL
+;
+.proc LNCOLCRD
+            jsr     LNCOLCRDST      ; Get coord in video RAM of current COL and LINE
+            ; Fall through
+.endproc
+
+; Internal procedure: Sets new video RAM origin at last video RAM destination
+;
+.proc VDST2ORG
+            pha                     ; Preserves A
+            lda     VRAMDST         ; Get VRAMDST and store into VRAMORG
+            sta     VRAMORG         ;
+            lda     VRAMDST+1       ;
+            sta     VRAMORG+1       ;
+            pla                     ; Restore A
+            rts
+.endproc
+
+; Internal procedure: Go up one raster line, mantaining X position
+;
+.proc RSTRLNUP
+            lda     VRAMORG         ; Get current coordinates
+            sec                     ; Substract number of bytes per line
+            sbc     #VIDHRES/8      ;
+            sta     VRAMORG         ; Update coordinates
+            bcs     RETURN          ;
+            dec     VRAMORG+1       ;
+RETURN:     rts
+.endproc
+
+; Internal procedure: Ring the bell
+;
+; Preserves registers
+;
+.proc RNGBEL
+            bit     NOBELL          ; Check if bell is on
+            bmi     SNDONE          ; No, just return
+            pha                     ; Save A onto the stack
+            txa                     ; Save X
+            pha                     ;
+            tya                     ; Save Y
+            pha                     ;
+            ldy     BELPER          ; Get period
+            ldx     BELCY           ;   volume
+            lda     BELVOL          ;   and duration
+            jmp     MKSOUND         ; Make sound, restore registers and return
+.endproc
+
+; GENERATE A CLICK
+;
+            .export CLICK
+
+.proc CLICK
+            bit     NOCLIK          ; If no click is set
+            bmi     SNDONE          ; Just return
+            pha                     ; Preserve A, X, Y
+            txa                     ;
+            pha                     ;
+            tya                     ;
+            pha                     ;
+            ldy     CLKPER          ; Set period
+            ldx     CLKCY           ; Set duration
+            lda     CLKVOL          ; Set volume
+            ; Fall through
+.endproc
+
+; Internal procedure: Generates an audible beep of period Y, volume X and duration A
+;
+; On entry, Y, X and A must be pushed into stack
+; On exit, restores A, X and Y from the stack
+;
+.proc MKSOUND
+            jsr     _BEEP           ; Make the sound
+            pla                     ; Restore Y, X, A
+            tay                     ;
+            pla                     ;
+            tax                     ;
+            pla                     ;
+            ; Fall through
+.endproc
+
+SNDONE:     rts                     ; Common return point for sound procedures
+
+; BEEP - Sound an audible beep. Generates a square wave of 2 x A amplitude
+;
+; Arguments: A = volume in range of $00 (silence) to $7F (maximum), $40 is normal
+;            X = duration in complete waveform cycles, 1-255, 0=256
+;            Y = waveform period in units of 200 microseconds
+;
+; Arguments returned: None, X and Y registers preserved (Manual says ALL, but A
+;                     is adjusted if was > $7F)
+;
+.proc _BEEP
+            cmp     #$00            ; Check if volume is within range
+            bpl     CONT            ; Under $80, continue
+            lsr     a               ; Over $80, adjust it into range
+CONT:       sta     ASVBP           ; Store volume temporarily
+            txa                     ; Preserve X
+            pha                     ;
+            jsr     _TIOON          ; Turn on I/O address space
+            lda     #$FF            ; Set audio port direction to OUT
+            sta     SVIA2ADIR       ;
+LOOP:       lda     ASVBP           ; Recover volume
+            clc                     ; Turn bit 7 on
+            adc     #$80            ;
+            sta     SVIA2APORT      ; Set level for higher half of the square wave
+            jsr     WAITHALF        ; Wait half waveform cycle
+            lda     #$80            ; Set level for lower half of the square wave
+            sec                     ;
+            sbc     ASVBP           ;
+            sta     SVIA2APORT      ;
+            jsr     WAITHALF        ; Wait the other half wafeform cycle
+            dex                     ; Repeat until duration is completed
+            bpl     LOOP            ;
+            lda     #$80            ; Mute
+            sta     SVIA2APORT      ;
+            jsr     _IORES          ; Restore RAM address space
+            pla                     ; Restore X
+            tax                     ;
+            lda     ASVBP           ; And restore adjusted A
+            rts
+.endproc
+
+; Internal procedure: Wait de duration of half a waveform period
+;
+; Arguments: Y contains the waveform period in units of 200 microseconds, so each
+;            loop must take 100 microseconds (as we are waiting the duration of
+;            half period)
+;
+.proc WAITHALF
+            tya                     ; Preserve Y (Period)
+            pha                     ;
+LOOP:       lda     #$12            ; Init 90 microseccons loop
+            sec
+WAIT90:     sbc     #$01            ; 90 microseconds loop (approx., could be up to
+                                    ; 108 if jump occurs between pages)
+            bne     WAIT90
+            dey                     ; Decrement count
+            bne     LOOP            ; And repeat until complete
+            pla                     ; Restore Y
+            tay                     ;
+            rts
+.endproc
+
+; DRWLEG - Draw legend boxes at the bottom 16 raster lines
+;
+; Monomeg display is VIDHRESxVIDVRES bits = $3C00 bytes
+;
+; Last 16 lines start at VIDHRES*(VIDVRES-16)/8 = $3840
+; and occupy 16*VIDHRES/8 = $3C0 bytes
+;
+; Origin of char legends is VIDHRES*(VIDVRES-2)/8 = $3B88
+;
+.proc _DRWLEG
+            jsr     _CLRLEG         ; Clear the legend boxes area
+            ldy     #$00            ; Init index to legends table
+            lda     #$05            ; Horizontal displacement from the origin byte
+            sta     BITDISPL        ;
+
+            ; Set origin of first legend (using dest because entering
+            ; the loop, orig is set as last dest)
+            ;
+            lda     #$9E ;>(VIDEORAM+VIDHRES*(VIDVRES-2)/8)
+            sta     VRAMDST+1
+            lda     #$A0 ;<(VIDEORAM+VIDHRES*(VIDVRES-2)/8)
+SETPOS:     sta     VRAMDST
+LGNDLOOP:   lda     #$04            ; Legends are 8 bytes long
+            sta     VRAMCNT         ; Use VRAMCNT LSB to store char count
+CKCHAR:     jsr     VDST2ORG        ; Make last dest the new orig
+            lda     LEGTBL,y        ; Get char of legend
+            sec                     ;
+            sbc     #' '            ; Char table starts with space, so rebase index
+            bcc     DRBLNK          ; If it is not printable, print a space instead
+            cmp     #$5F            ; Is it over the last printable char?
+            bcc     CONT            ; No, continue
+DRBLNK:     lda     #$00            ; Yes, print a space instead
+CONT:       sty     VRAMCNT+1       ; Use VRAMCNT MSB to preserve legend table index
+            jsr     PRNCHR          ; Print char
+            lda     BITDISPL        ; Recover displacement of last char
+            clc                     ;
+            adc     #$06            ; Calculate next displacement adding char width
+            cmp     #$08            ; If within the byte length
+            bcc     STDISP          ;    continue
+            and     #$07            ; MOD 8
+            inc     VRAMDST         ; And increment char origin
+STDISP:     sta     BITDISPL        ; Store new displacement
+            ldy     VRAMCNT+1       ; Recover legend table index
+            iny                     ; Next char in table
+            dec     VRAMCNT         ; One less char of current legend left
+            bne     CKCHAR          ; Go print char until no more left
+            inc     VRAMDST         ; Legend complete. Advance to next box
+
+            ; There are 8 legends, each legend is 8 bytes long, so half of the
+            ; table is at 4 * 8 = 32 ($20)
+            ;
+            cpy     #LEGTSIZ/2      ; Half of the table?
+            bne     CHKEND          ; No, check if end
+
+            ; Beginning of raster line for legends was $FB88. There are 60 ($3C)
+            ; bytes per line, so $FB88+($3C/2) = $FBA6
+            ;
+            lda     #$B4            ; Position of the second legend group (half line)
+            bne     SETPOS          ; Always jump
+            ; Not reached
+
+CHKEND:     cpy     #LEGTSIZ        ; End of the table?
+            bcc     LGNDLOOP        ; No, continue printing
+
+            ; Beginning of last scanline: VIDEORAM+VIDHRES*(VIDVRES-1)/8 = $FBC4
+            ;
+            lda     #$C8 ;<(VIDEORAM+VIDHRES*(VIDVRES-1)/8)
+            sta     VRAMDST
+            lda     #$9E ;>(VIDEORAM+VIDHRES*(VIDVRES-1)/8)
+            sta     VRAMDST+1
+            jsr     DRBOXGRP        ; Draw box group
+            lda     #$DC            ; Position of the second box group (half line)
+            sta     VRAMDST         ;
+            ; Fall through to print the second box group
+.endproc
+
+; Internal procedure: Draws group of four boxes starting at VRAMDST
+;
+.proc DRBOXGRP
+            jsr     SWTBANK1        ; Turns on I-O address space and switches to bank 1
+            lda     #$04            ; Each group has 4 boxes
+            sta     VRAMCNT         ; Store the box count
+LOOP:       jsr     DRWBOX          ; Draw box
+            lda     VRAMDST         ; Get origin of last box
+            clc                     ; Adds box length (7 bytes or 56 pixels)
+            adc     #$04            ;
+            sta     VRAMDST         ;
+            dec     VRAMCNT         ; One less box to go
+            bne     LOOP            ; Loop until no more
+            jsr     VDST2ORG        ; Move VRAMDST to VRAMORG
+            jsr     DRVRBOXLN       ; Draws rigth vertical line of last box group
+            jmp     RSTBANK0        ; Restores Bank 0 and turns on RAM at BE00-BFFF
+.endproc
+
+; Internal procedure: Draw legend box. Draws top and bottom horizontal lines
+; and left vertical line
+;
+.proc DRWBOX
+            jsr     VDST2ORG        ; Move VRAMDST to VRAMORG
+            jsr     DRHRBOXLN       ; Draw a horizontal 48 pixel long line
+            jsr     DRVRBOXLN       ; Draw a vertical 13 pixel line going up
+                                    ; At this point, VRAMORG is 13 lines up, so
+                                    ; next procedure will print the top line
+            ; Fall through
+.endproc
+
+; Internal procedure: Draw a 56 pixel horizontal line (7 bytes) starting
+; at VRAMORG
+;
+.proc DRHRBOXLN
+            ldy     #$03            ; Byte count minus one
+            lda     #$FF            ; Solid line
+LOOP:       sta     (VRAMORG),y     ; Draw segment
+            dey                     ; Next byte segment
+            bpl     LOOP            ; Until no more
+            rts
+.endproc
+
+; Internal procedure: Draw a 13 pixel vertical line starting at VRAMORG and
+; going upwards
+;
+.proc DRVRBOXLN
+            ldy     #$00
+            ldx     #$0D            ; Line length
+            bne     START           ; Always jump
+LOOP:       jsr     RSTRLNUP        ; Go up one raster line
+START:      lda     (VRAMORG),y     ; Get current byte value
+            ora     #$80            ; Turns on first pixel (most significant bit)
+            sta     (VRAMORG),y     ;
+            dex                     ; Next pixel
+            bne     LOOP            ; Loop until no more
+            rts
+.endproc
+
+IODRIVER_SIZE = * - SPKTRL
+
+
+            .segment "chartbl"
+
+            .byte   $58             ; CODOS loadable file header byte
+            .byte   $00             ; Memory overlay
+            .byte   $00             ; Memory bank
+            .byte   $00             ; Reserved
+            .addr   INITIO          ; Entry point
+            .addr   CHTB            ; Load address
+            .word   CHTB_SIZE       ; Memory image size
+
+
+; CHARACTER FONT TABLE
+; ENTRIES IN ORDER staRTING AT ASCII BLANK
+; 96 ENTRIES
+; EACH ENTRY CONTAINS 7 BYTES
+; 7 BYTES ARE CHARACTER MATRIX, TOP ROW FIRST, LEFTMOST DOT
+; IS LEFTMOST IN BYTE
+; LOWER CASE FONT IS SMALL UPPER CASE, 5 BY 5 MATRIX
+;
+CHTB:       .byte        $00, $00, $00  ; BLANK
+            .byte   $00, $00, $00, $00
+            .byte        $20, $20, $20  ; !
+            .byte   $20, $20, $00, $20
+            .byte        $50, $50, $50  ; "
+            .byte   $00, $00, $00, $00
+            .byte        $50, $50, $F8  ; #
+            .byte   $50, $F8, $50, $50
+            .byte        $20, $78, $A0  ; $
+            .byte   $70, $28, $F0, $20
+            .byte        $C8, $C8, $10  ; %
+            .byte   $20, $40, $98, $98
+            .byte        $40, $A0, $A0  ; &
+            .byte   $40, $A8, $90, $68
+            .byte        $30, $30, $30  ; '
+            .byte   $00, $00, $00, $00
+            .byte        $20, $40, $40  ; (
+            .byte   $40, $40, $40, $20
+            .byte        $20, $10, $10  ; )
+            .byte   $10, $10, $10, $20
+            .byte        $20, $A8, $70  ; *
+            .byte   $20, $70, $A8, $20
+            .byte        $00, $20, $20  ; +
+            .byte   $F8, $20, $20, $00
+            .byte        $01, $00, $00  ; ,
+            .byte   $30, $30, $10, $20
+            .byte        $00, $00, $00  ; -
+            .byte   $F8, $00, $00, $00
+            .byte        $00, $00, $00  ; .
+            .byte   $00, $00, $30, $30
+            .byte        $08, $08, $10  ; /
+            .byte   $20, $40, $80, $80
+            .byte        $60, $90, $90  ; 0
+            .byte   $90, $90, $90, $60
+            .byte        $20, $60, $20  ; 1
+            .byte   $20, $20, $20, $70
+            .byte        $70, $88, $10  ; 2
+            .byte   $20, $40, $80, $F8
+            .byte        $70, $88, $08  ; 3
+            .byte   $30, $08, $88, $70
+            .byte        $10, $30, $50  ; 4
+            .byte   $90, $F8, $10, $10
+            .byte        $F8 ,$80, $F0  ; 5
+            .byte   $08, $08, $08, $F0
+            .byte        $70, $80, $80  ; 6
+            .byte   $F0, $88, $88, $70
+            .byte        $F8, $08, $10  ; 7
+            .byte   $20, $40, $80, $80
+            .byte        $70, $88, $88  ; 8
+            .byte   $70, $88, $88, $70
+            .byte        $70, $88, $88  ; 9
+            .byte   $78, $08, $08, $70
+            .byte        $00, $00, $30  ; :
+            .byte   $30, $00, $30, $30
+            .byte        $31, $30, $00  ; ;
+            .byte   $30, $30, $10, $20
+            .byte        $10, $20, $40  ; LESS THAN
+            .byte   $80, $40, $20, $10
+            .byte        $00, $00, $F8  ; =
+            .byte   $00, $F8, $00, $00
+            .byte        $40, $20, $10  ; GREATER THAN
+            .byte   $08, $10, $20, $40
+            .byte        $70, $88, $08  ; ?
+            .byte   $10, $20, $00, $20
+            .byte        $70, $88, $08  ; @
+            .byte   $68, $A8, $A8, $D0
+            .byte        $20, $50, $88  ; A
+            .byte   $88, $F8, $88, $88
+            .byte        $F0, $48, $48  ; B
+            .byte   $70, $48, $48, $F0
+            .byte        $70, $88, $80  ; C
+            .byte   $80, $80, $88, $70
+            .byte        $F0, $48, $48  ; D
+            .byte   $48, $48, $48, $F0
+            .byte        $F8, $80, $80  ; E
+            .byte   $F0, $80, $80, $F8
+            .byte        $F8, $80, $80  ; F
+            .byte   $F0, $80, $80, $80
+            .byte        $70, $88, $80  ; G
+            .byte   $B8, $88, $88, $70
+            .byte        $88, $88, $88  ; H
+            .byte   $F8, $88, $88, $88
+            .byte        $70, $20, $20  ; I
+            .byte   $20, $20, $20, $70
+            .byte        $38, $10, $10  ; J
+            .byte   $10, $10, $90, $60
+            .byte        $88, $90, $A0  ; K
+            .byte   $C0, $A0, $90, $88
+            .byte        $80, $80, $80  ; L
+            .byte   $80, $80, $80, $F8
+            .byte        $88, $D8, $A8  ; M
+            .byte   $A8, $88, $88, $88
+            .byte        $88, $88, $C8  ; N
+            .byte   $A8, $98, $88, $88
+            .byte        $70, $88, $88  ; O
+            .byte   $88, $88, $88, $70
+            .byte        $F0, $88, $88  ; P
+            .byte   $F0, $80, $80, $80
+            .byte        $70, $88, $88  ; Q
+            .byte   $88, $A8, $90, $68
+            .byte        $F0, $88, $88  ; R
+            .byte   $F0, $A0, $90, $88
+            .byte        $78, $80, $80  ; S
+            .byte   $70, $08, $08, $F0
+            .byte        $F8, $20, $20  ; T
+            .byte   $20, $20, $20, $20
+            .byte        $88, $88, $88  ; U
+            .byte   $88, $88, $88, $70
+            .byte        $88, $88, $88  ; V
+            .byte   $50, $50, $20, $20
+            .byte        $88, $88, $88  ; W
+            .byte   $A8, $A8, $D8, $88
+            .byte        $88, $88, $50  ; X
+            .byte   $20, $50, $88, $88
+            .byte        $88, $88, $50  ; Y
+            .byte   $20, $20, $20, $20
+            .byte        $F8, $08, $10  ; Z
+            .byte   $20, $40, $80, $F8
+            .byte        $70, $40, $40  ; LEFT BRACKET
+            .byte   $40, $40, $40, $70
+            .byte        $80, $80, $40  ; BACKSLASH
+            .byte   $20, $10, $08, $08
+            .byte        $70, $10, $10  ; RIGHT BRACKET
+            .byte   $10, $10, $10, $70
+            .byte        $20, $50, $88  ; CARET
+            .byte   $00, $00, $00, $00
+            .byte        $00, $00, $00  ; UNDERLINE
+            .byte   $00, $00, $00, $F8
+            .byte        $C0, $60, $30  ; GRAVE ACCENT
+            .byte   $00, $00, $00, $00
+            .byte        $00, $60, $10  ; A (LC)
+            .byte   $70, $90, $90, $68
+            .byte        $80, $80, $F0  ; B (LC)
+            .byte   $88, $88, $88, $F0
+            .byte        $00, $00, $78  ; C (LC)
+            .byte   $80, $80, $80, $78
+            .byte        $08, $08, $78  ; D (LC)
+            .byte   $88, $88, $88, $78
+            .byte        $00, $00, $70  ; E (LC)
+            .byte   $88, $F0, $80, $78
+            .byte        $30, $40, $40  ; F (LC)
+            .byte   $E0, $40, $40, $40
+            .byte        $71, $88, $88  ; G (LC)
+            .byte   $98, $68, $08, $70
+            .byte        $80, $80, $B0  ; H (LC)
+            .byte   $C8, $88, $88, $88
+            .byte        $20, $00, $60  ; I (LC)
+            .byte   $20, $20, $20, $70
+            .byte        $73, $10, $10  ; J (LC)
+            .byte   $10, $10, $90, $60
+            .byte        $80, $80, $90  ; K (LC)
+            .byte   $A0, $C0, $A0, $90
+            .byte        $60, $20, $20  ; L (LC)
+            .byte   $20, $20, $20, $20
+            .byte        $00, $00, $D0  ; M (LC)
+            .byte   $A8, $A8, $A8, $A8
+            .byte        $00, $00, $B0  ; N (LC)
+            .byte   $C8, $88, $88, $88
+            .byte        $00, $00, $70  ; O (LC)
+            .byte   $88, $88, $88, $70
+            .byte        $F1, $88, $88  ; P (LC)
+            .byte   $88, $F0, $80, $80
+            .byte        $79, $88, $88  ; Q (LC)
+            .byte   $88, $78, $08, $08
+            .byte        $00, $00, $B0  ; R (LC)
+            .byte   $C8, $80, $80, $80
+            .byte        $00, $00, $78  ; S (LC)
+            .byte   $80, $70, $08, $F0
+            .byte        $40, $40, $E0  ; T (LC)
+            .byte   $40, $40, $50, $20
+            .byte        $00, $00, $90  ; U (LC)
+            .byte   $90, $90, $90, $68
+            .byte        $00, $00, $88  ; V (LC)
+            .byte   $88, $50, $50, $20
+            .byte        $00, $00, $A8  ; W (LC)
+            .byte   $A8, $A8, $A8, $50
+            .byte        $00, $00, $88  ; X (LC)
+            .byte   $50, $20, $50, $88
+            .byte        $89, $88, $88  ; Y (LC)
+            .byte   $50, $20, $40, $80
+            .byte        $00, $00, $F8  ; Z (LC)
+            .byte   $10, $20, $40, $F8
+            .byte        $10, $20, $20 ; LEFT BRACE
+            .byte   $60, $20, $20, $10
+            .byte        $20, $20, $20 ; VERTICAL BAR
+            .byte   $00, $20, $20, $20
+            .byte        $40, $20, $20 ; RIGHT BRACE
+            .byte   $30, $20, $20, $40
+            .byte        $10, $A8, $40 ; CURLY
+            .byte   $00, $00, $00, $00
+            .byte        $A8, $50, $A8 ; RUBOUT
+            .byte   $50, $A8, $50, $A8
+
+CHTB_SIZE = * - CHTB
+
+            .end
