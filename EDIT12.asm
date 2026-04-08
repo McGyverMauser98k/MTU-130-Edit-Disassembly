@@ -145,7 +145,7 @@ ACDD   00                   .BYTE $00
 ACDE   00                   .BYTE $00
 ACDF   00                   .BYTE $00
 ACE0   00                   .BYTE $00
-ACE1						.BYTE "COMMAND"
+ACE1						.BYTE "COMMAND"								;COMMAND NAMES USED IN COMMAND WINDOW
 ACE8   00             		.BYTE $00
 ACE9   00                   .BYTE $00
 ACEA						.BYTE "TEXT"
@@ -170,10 +170,10 @@ AD15						.BYTE "QUIT"
 AD19   07                   .BYTE $07
 AD1A   00                   .BYTE $00
 AD1B						.BYTE "OTHER"
-AD20   08                   .BYTE $08													;$08 - CURSOR POSITION IN EDITED LINE (0-4F FOR MTU, 0-34 FOR KIM-1)
+AD20   08                   .BYTE $08
 AD21   00                   .BYTE $00
 AD22						.BYTE "DELETE"
-AD28   09                	.BYTE $09										;$09 - CHARACTERS COUNT IN ACTUAL EDITED LINE
+AD28   09                	.BYTE $09					
 AD29   00                   .BYTE $00
 AD2A						.BYTE "COPY"
 AD2E   0A                   .BYTE $0A
@@ -185,7 +185,7 @@ AD36						.BYTE "WRITE"
 AD3B   0C                	.BYTE $0C
 AD3C   80                   .BYTE $80
 AD3D						.BYTE "CANCEL"
-AD43   0D 					.BYTE $0D											;0D - MAXIMUM TEXT LINE LENGHT (MTU130-#$50, KIM-1 MAX #$35)
+AD43   0D 					.BYTE $0D										
 AD44   00 					.BYTE $00
 AD45						.BYTE "JOINLINE"
 AD4D   0E                	.BYTE $0E
@@ -210,7 +210,7 @@ AD73   04                   .BYTE $04
 AD74   05 					.BYTE $05
 AD75   06                	.BYTE $06
 AD76   07                   .BYTE $07               
-AD77   08                   .BYTE $08													;$08 - CURSOR POSITION IN EDITED LINE (0-4F FOR MTU, 0-34 FOR KIM-1)
+AD77   08                   .BYTE $08	
 AD78   00                   .BYTE $00
 AD79   00                   .BYTE $00
 AD7A   00                   .BYTE $00
@@ -549,8 +549,8 @@ EDITPART2:
 097C   B0 29                BCS L09A7
 097E   EC 8D AC             CPX $AC8D
 0981   B0 24                BCS L09A7
-0983   BD 00 A8             LDA $A800,X
-0986   CD F0 A9             CMP $A9F0
+0983   BD 00 A8             LDA $A800,X								;COMPARE LOADED SCREEN LINE IN BUFFER
+0986   CD F0 A9             CMP $A9F0								;WITH ENTERED TEXT TO FIND
 0989   D0 EE                BNE L0979
 098B   86 08                STX $08										;$08 - CURSOR POSITION IN EDITED LINE (0-4F FOR MTU, 0-34 FOR KIM-1)
 098D   A0 00                LDY #$00
@@ -566,10 +566,10 @@ EDITPART2:
 09A2   A6 08                LDX $08										;$08 - CURSOR POSITION IN EDITED LINE (0-4F FOR MTU, 0-34 FOR KIM-1)
 09A4   4C 79 09             JMP L0979
 09A7   20 FE 1D   L09A7:    JSR L1DFE
-09AA   AD ED BF             LDA $BFED									;TEST IF BREAK KEY PRESSED ON KEYBOARD SYS1 6522
-09AD   29 02                AND #$02
-09AF   F0 0C                BEQ L09BD									;SKIP IF BREAK PRESSED
-09B1   38                   SEC
+09AA   AD ED BF             LDA $BFED									;TEST IF BREAK KEY PRESSED ON KEYBOARD SYS1 6522 $BFED
+09AD   29 02                AND #$00						;#$02		;00 FOR KIM-1 - DON'T USE BREAK
+09AF   F0 0C                BEQ L09BD									;IF BREAK WAS NOT PRESSED SKIP
+09B1   38                   SEC                                         ;BREAK WAS PRESSED SO BREAK
 09B2   6E 69 AC             ROR $AC69
 09B5   A9 07                LDA #$07
 09B7   20 09 03             JSR $0309									; OUTCH - TO DISPLAY A PRINTABLE CHARACTER OR INTERPRET A CONTROL CHARACTER
@@ -2790,7 +2790,7 @@ EDITPART2:
 1D52   8C DC AC             STY $ACDC
 1D55   A4 12                LDY $12
 1D57   8C DD AC             STY $ACDD
-1D5A   C8         L1D5A:    INY
+1D5A   C8         L1D5A:    INY								;FIND FUNCTION COUNTING LINE LENGHT
 1D5B   D0 19                BNE L1D76
 1D5D   E6 11                INC $11
 1D5F   A5 11                LDA $11
@@ -2803,9 +2803,9 @@ EDITPART2:
 1D6F   90 E9                BCC L1D5A
 1D71   D0 34                BNE L1DA7
 1D73   4C A8 1D             JMP L1DA8
-1D76   B1 10      L1D76:    LDA ($10),Y
+1D76   B1 10      L1D76:    LDA ($10),Y							;???? FIND FUNCTION - LOADING DATA FROM FILE
 1D78   9D 00 A8             STA $A800,X
-1D7B   C9 09                CMP #$09
+1D7B   C9 09                CMP #$09							;CHECK TABULATOR
 1D7D   D0 1C                BNE L1D9B
 1D7F   CE 5B AC             DEC $AC5B
 1D82   2C 5A AC             BIT $AC5A									;TAB OPTION POINTER "THE "T=N" OPTION SPECIFIES THAT TAB CHARACTERS SHOULD NOT BE EXPANDED TO BLANKS."
@@ -2819,7 +2819,7 @@ EDITPART2:
 1D94   E4 1A                CPX $1A
 1D96   90 F8                BCC L1D90
 1D98   4C 5A 1D             JMP L1D5A
-1D9B   C9 0D      L1D9B:    CMP #$0D
+1D9B   C9 0D      L1D9B:    CMP #$0D						;FIND FUNCTION ???? END OF LINE CHECKING
 1D9D   F0 08                BEQ L1DA7
 1D9F   E4 0A                CPX $0A
 1DA1   E8                   INX
@@ -3857,9 +3857,9 @@ EDITPART2:
 2580   4C 06 03   L2580:    JMP $0306									; GETKEY - TO WAIT UNTIL A KEYBOARD KEY IS STRUCK AND RETURN WITH CHARACTER IN A.
 2583   8E CE AC   L2583:    STX $ACCE
 2586   AD ED BF             LDA $BFED									;TEST IF BREAK KEY PRESSED ON KEYBOARD SYS1 6522
-2589   29 02                AND #$02
-258B   F0 0B                BEQ L2598									;SKIP IF BREAK PRESSED
-258D   A9 00                LDA #$00
+2589   29 02                AND #$00			;#$02					;00 FOR KIM-1 - DON'T USE BREAK
+258B   F0 0B                BEQ L2598									;IF BREAK WAS NOT PRESSED SKIP
+258D   A9 00                LDA #$00									;BREAK WAS PRESSED SO BREAK
 258F   8D 5D AC             STA $AC5D
 2592   AE CE AC             LDX $ACCE
 2595   4C 80 25             JMP L2580
@@ -3874,7 +3874,7 @@ EDITPART2:
 25AC   AE CE AC             LDX $ACCE
 25AF   60                   RTS                           			    ;RETURN FROM SUBRUTINE
 
-
+											;RETURN FROM FIND FUNCTION
 25B0   A9 FF      L25B0:    LDA #$FF									;PROBABLY 256 SCREEN LINES???
 25B2   8D 84 AC             STA $AC84
 25B5   8D 85 AC             STA $AC85
@@ -4015,7 +4015,7 @@ EDITPART2:
 26E4   2C 15 02             BIT $0215									;'RVIDEO' - IF BIT 7=1 THEN CHARACTERS ARE DRAWN IN REVERSE VIDEO.
 26E7   10 E2                BPL L26CB
 26E9   0E 15 02             ASL $0215									;'RVIDEO' - IF BIT 7=1 THEN CHARACTERS ARE DRAWN IN REVERSE VIDEO.
-26EC   4C CB 26             JMP L26CB
+26EC   4C CB 26             JMP L26CB						;??IN FIND ???
 26EF   2C 58 AC   L26EF:    BIT $AC58
 26F2   30 1D                BMI L2711
 26F4   A5 00                LDA $00
